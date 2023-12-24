@@ -59,7 +59,7 @@ class DirMonitor(_PluginBase):
     # 插件图标
     plugin_icon = "directory.png"
     # 插件版本
-    plugin_version = "1.5.4"
+    plugin_version = "1.5.5"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -338,7 +338,6 @@ class DirMonitor(_PluginBase):
                     event_path = event_path[:event_path.find("BDMV")]
                     file_path = Path(event_path)
 
-                logger.info(f"event path: {str(file_path)}")
                 # 查询历史记录，已转移的不处理
                 if self.transferhis.get_by_src(str(file_path)):
                     logger.info(f"{event_path} 已整理过")
