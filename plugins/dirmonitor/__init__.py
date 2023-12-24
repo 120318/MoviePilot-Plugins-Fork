@@ -303,9 +303,9 @@ class DirMonitor(_PluginBase):
                 return
             # 全程加锁
             with lock:
-                transfer_history = self.transferhis.get_by_src(event_path)
+                transfer_history = self.transferhis.get_by_src(str(file_path))
                 if transfer_history:
-                    logger.debug("文件已处理过：%s" % event_path)
+                    logger.debug("文件已处理过：%s" % str(file_path))
                     return
 
                 # 回收站及隐藏的文件不处理
