@@ -59,7 +59,7 @@ class DirMonitor(_PluginBase):
     # 插件图标
     plugin_icon = "directory.png"
     # 插件版本
-    plugin_version = "1.5.1"
+    plugin_version = "1.5.2"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -288,7 +288,6 @@ class DirMonitor(_PluginBase):
         """
         if not event.is_directory:
             # 文件发生变化
-            logger.debug("文件%s：%s" % (text, event_path))
             self.__handle_file(event_path=event_path, mon_path=mon_path)
 
     def __handle_file(self, event_path: str, mon_path: str):
@@ -303,11 +302,6 @@ class DirMonitor(_PluginBase):
                 return
             # 全程加锁
             with lock:
-                transfer_history = self.transferhis.get_by_src(str(file_path))
-                if transfer_history:
-                    logger.debug("文件已处理过：%s" % str(file_path))
-                    return
-
                 # 回收站及隐藏的文件不处理
                 if event_path.find('/@Recycle/') != -1 \
                         or event_path.find('/#recycle/') != -1 \
@@ -343,6 +337,11 @@ class DirMonitor(_PluginBase):
                     # 截取BDMV前面的路径
                     event_path = event_path[:event_path.find("BDMV")]
                     file_path = Path(event_path)
+
+                transfer_history = self.transferhis.get_by_src(event_path)
+                if transfer_history:
+                    logger.debug("文件已处理过：%s" % event_path)
+                    return
 
                 # 查询历史记录，已转移的不处理
                 if self.transferhis.get_by_src(event_path):
