@@ -9,17 +9,17 @@ from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
 
 
-class HD4fans(_ISiteSigninHandler):
+class NexusHD(_ISiteSigninHandler):
     """
-    兽签到
+    NexusHD签到
     """
 
     # 匹配的站点Url，每一个实现类都需要设置为自己的站点Url
-    site_url = "pt.hd4fans.org"
+    site_url = "v6.nexushd.org"
 
     # 签到成功
-    _repeat_text = '<span id="checkedin">[签到成功]</span>'
-    _success_text = "签到成功"
+    _success_text = "本次签到获得"
+    _repeat_text = "你今天已经签到过了"
 
     @classmethod
     def match(cls, url: str) -> bool:
@@ -39,43 +39,32 @@ class HD4fans(_ISiteSigninHandler):
         site = site_info.get("name")
         site_cookie = site_info.get("cookie")
         ua = site_info.get("ua")
-        proxy = site_info.get("proxy")
-        render = site_info.get("render")
+        proxies = settings.PROXY if site_info.get("proxy") else None
 
         # 获取页面html
-        html_text = self.get_page_source(url='https://pt.hd4fans.org/index.php',
-                                         cookie=site_cookie,
-                                         ua=ua,
-                                         proxy=proxy,
-                                         render=render)
-        if not html_text:
+        data = {
+            'action': 'post',
+            'content': ''
+        }
+        html_res = RequestUtils(cookies=site_cookie,
+                                ua=ua,
+                                proxies=proxies
+                                ).post_res(url="https://v6.nexushd.org/signin.php", data=data)
+        if not html_res or html_res.status_code != 200:
             logger.error(f"{site} 签到失败，请检查站点连通性")
             return False, '签到失败，请检查站点连通性'
 
-        if "login.php" in html_text:
+        if "login.php" in html_res.text:
             logger.error(f"{site} 签到失败，Cookie已失效")
             return False, '签到失败，Cookie已失效'
 
         # 判断是否已签到
-        if self._repeat_text in html_text:
-            logger.info(f"{site} 今日已签到")
-            return True, '今日已签到'
-
-        # 签到
-        data = {
-            'action': 'checkin'
-        }
-        sign_res = RequestUtils(cookies=site_cookie,
-                                ua=ua,
-                                proxies=settings.PROXY if proxy else None
-                                ).post_res(url="https://pt.hd4fans.org/checkin.php", data=data)
-        if not sign_res or sign_res.status_code != 200:
-            logger.error(f"{site} 签到失败，请检查站点连通性")
-            return False, '签到失败，请检查站点连通性'
-        # sign_res.text=本次签到魔力
-        if sign_res.text and sign_res.text.isdigit():
+        # '已连续签到278天，此次签到您获得了100魔力值奖励!'
+        if self._success_text in html_res.text:
             logger.info(f"{site} 签到成功")
             return True, '签到成功'
-
-        logger.error(f"{site} 签到失败，签到接口返回 {sign_res.text}")
+        if self._repeat_text in html_res.text:
+            logger.info(f"{site} 今日已签到")
+            return True, '今日已签到'
+        logger.error(f"{site} 签到失败，签到接口返回 {html_res.text}")
         return False, '签到失败'

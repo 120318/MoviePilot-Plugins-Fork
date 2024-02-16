@@ -8,23 +8,23 @@ from typing import Any, List, Dict, Tuple
 from app.log import logger
 
 
-class IyuuMsg(_PluginBase):
+class PushPlusMsg(_PluginBase):
     # 插件名称
-    plugin_name = "IYUU消息通知"
+    plugin_name = "PushPlus消息推送"
     # 插件描述
-    plugin_desc = "支持使用IYUU发送消息通知。"
+    plugin_desc = "支持使用PushPlus发送消息通知。"
     # 插件图标
-    plugin_icon = "Iyuu_A.png"
+    plugin_icon = "Pushplus_A.png"
     # 插件版本
-    plugin_version = "1.2"
+    plugin_version = "1.0"
     # 插件作者
-    plugin_author = "jxxghp"
+    plugin_author = "cheng"
     # 作者主页
-    author_url = "https://github.com/jxxghp"
+    author_url = "https://github.com/small-ora"
     # 插件配置项ID前缀
-    plugin_config_prefix = "iyuumsg_"
+    plugin_config_prefix = "pushplusmsg_"
     # 加载顺序
-    plugin_order = 25
+    plugin_order = 29
     # 可使用的用户级别
     auth_level = 1
 
@@ -98,8 +98,8 @@ class IyuuMsg(_PluginBase):
                                         'component': 'VTextField',
                                         'props': {
                                             'model': 'token',
-                                            'label': 'IYUU令牌',
-                                            'placeholder': 'IYUUxxx',
+                                            'label': 'PushPlus令牌',
+                                            'placeholder': 'c3f0**',
                                         }
                                     }
                                 ]
@@ -173,22 +173,29 @@ class IyuuMsg(_PluginBase):
             return
 
         try:
-            sc_url = "https://iyuu.cn/%s.send?%s" % (self._token, urlencode({"text": title, "desp": text}))
-            res = RequestUtils().get_res(sc_url)
+            sc_url = "http://www.pushplus.plus/send"
+            event_info = {
+                "token": self._token,
+                "title": title,
+                "content": text,
+                "template": "txt",
+                "channel":"wechat"
+            }
+            res = RequestUtils(content_type="application/json").post_res(sc_url, json=event_info)
             if res and res.status_code == 200:
                 ret_json = res.json()
-                errno = ret_json.get('errcode')
-                error = ret_json.get('errmsg')
-                if errno == 0:
-                    logger.info("IYUU消息发送成功")
+                code = ret_json.get('code')
+                msg = ret_json.get('msg')
+                if code == 200:
+                    logger.info("PushPlus消息发送成功")
                 else:
-                    logger.warn(f"IYUU消息发送失败，错误码：{errno}，错误原因：{error}")
+                    logger.warn(f"PushPlus消息发送，接口返回失败，错误码：{code}，错误原因：{msg}")
             elif res is not None:
-                logger.warn(f"IYUU消息发送失败，错误码：{res.status_code}，错误原因：{res.reason}")
+                logger.warn(f"PushPlus消息发送失败，错误码：{res.status_code}，错误原因：{res.reason}")
             else:
-                logger.warn("IYUU消息发送失败，未获取到返回信息")
+                logger.warn("PushPlus消息发送失败，未获取到返回信息")
         except Exception as msg_e:
-            logger.error(f"IYUU消息发送失败，{str(msg_e)}")
+            logger.error(f"PushPlus消息发送异常，{str(msg_e)}")
 
     def stop_service(self):
         """
