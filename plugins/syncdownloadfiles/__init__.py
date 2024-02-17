@@ -22,7 +22,7 @@ class SyncDownloadFiles(_PluginBase):
     # 插件图标
     plugin_icon = "Youtube-dl_A.png"
     # 插件版本
-    plugin_version = "1.0.4"
+    plugin_version = "1.0.5"
     # 插件作者
     plugin_author = "thsrite"
     # 作者主页
@@ -157,7 +157,7 @@ class SyncDownloadFiles(_PluginBase):
                 downloadhis = self.downloadhis.get_by_hash(hash_str)
                 if downloadhis:
                     downlod_files = self.downloadhis.get_files_by_hash(hash_str)
-                    logger.info(f"download files: {download_files}")
+                    logger.info(f"download files: {downlod_files}")
                     if downlod_files:
                         logger.info(f"种子 {hash_str} 通过MoviePilot下载，跳过处理")
                         continue
