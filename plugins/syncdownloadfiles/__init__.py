@@ -22,7 +22,7 @@ class SyncDownloadFiles(_PluginBase):
     # 插件图标
     plugin_icon = "Youtube-dl_A.png"
     # 插件版本
-    plugin_version = "1.0.2"
+    plugin_version = "1.0.3"
     # 插件作者
     plugin_author = "thsrite"
     # 作者主页
@@ -141,7 +141,7 @@ class SyncDownloadFiles(_PluginBase):
 
             for torrent in torrents:
                 # 返回false，标识后续种子已被同步
-                logger.info(f"torrent data: {torrent}")
+                logger.info(f"torrent data: {torrent}, {last_sync_time}, {downloader}")
                 sync_flag = self.__compare_time(torrent, downloader, last_sync_time)
 
                 logger.info(f"sync flag {sync_flag}")
@@ -294,14 +294,18 @@ class SyncDownloadFiles(_PluginBase):
             # 获取种子时间
             if dl_tpe == "qbittorrent":
                 torrent_date = time.gmtime(torrent.get("added_on"))  # 将时间戳转换为时间元组
+                logger.info(f"torrent date {torrent_date}")
                 torrent_date = time.strftime("%Y-%m-%d %H:%M:%S", torrent_date)  # 格式化时间
+                logger.info(f"torrent date {torrent_date}")
             else:
                 torrent_date = torrent.added_date
 
             # 之后的种子已经同步了
             if last_sync_time > str(torrent_date):
+                logger.info(1)
                 return False
 
+        logger.info(2)
         return True
 
     @staticmethod
