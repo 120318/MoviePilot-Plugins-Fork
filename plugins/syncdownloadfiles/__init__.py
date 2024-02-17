@@ -22,7 +22,7 @@ class SyncDownloadFiles(_PluginBase):
     # 插件图标
     plugin_icon = "Youtube-dl_A.png"
     # 插件版本
-    plugin_version = "1.0"
+    plugin_version = "1.0.1"
     # 插件作者
     plugin_author = "thsrite"
     # 作者主页
@@ -141,6 +141,7 @@ class SyncDownloadFiles(_PluginBase):
 
             for torrent in torrents:
                 # 返回false，标识后续种子已被同步
+                logger.info(f"torrent data: {torrent}")
                 sync_flag = self.__compare_time(torrent, downloader, last_sync_time)
 
                 if not sync_flag:
