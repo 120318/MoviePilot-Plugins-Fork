@@ -31,7 +31,7 @@ class BrushFlow(_PluginBase):
     # 插件图标
     plugin_icon = "brush.jpg"
     # 插件版本
-    plugin_version = "1.1.1"
+    plugin_version = "1.1.2"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -1379,11 +1379,11 @@ class BrushFlow(_PluginBase):
                         # 将种子发布日志转换为与当前时间的差
                         if begin_pubtime and not end_pubtime \
                                 and pubdate_minutes > int(begin_pubtime):
-                            logger.warn(f"种子距今发布时间为 {pubdate_minutes}，限制条件为{begin_pubtime}之内，跳过")
+                            logger.warn(f"种子{torrent.title}距今发布时间为 {pubdate_minutes}，限制条件为{begin_pubtime}之内，跳过")
                             continue
                         elif begin_pubtime and end_pubtime \
                                 and not int(begin_pubtime) <= pubdate_minutes <= int(end_pubtime):
-                            logger.warn(f"种子距今发布时间为 {pubdate_minutes}，限制条件为{begin_pubtime}-{end_pubtime}，跳过")
+                            logger.warn(f"种子{torrent.title}距今发布时间为 {pubdate_minutes}，限制条件为{begin_pubtime}-{end_pubtime}，跳过")
                             continue
                     # 同时下载任务数
                     downloads = self.__get_downloading_count()
