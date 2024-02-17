@@ -22,7 +22,7 @@ class SyncDownloadFiles(_PluginBase):
     # 插件图标
     plugin_icon = "Youtube-dl_A.png"
     # 插件版本
-    plugin_version = "1.0.3"
+    plugin_version = "1.0.4"
     # 插件作者
     plugin_author = "thsrite"
     # 作者主页
@@ -166,13 +166,21 @@ class SyncDownloadFiles(_PluginBase):
                 download_dir = self.__get_download_dir(torrent, downloader)
                 logger.info(f"download dir: {download_dir}")
 
+                in_path =  False
                 # 处理路径映射
                 if self._dirs:
+                    logger.info(f"dirs: {self._dirs}")
                     paths = self._dirs.split("\n")
                     for path in paths:
                         sub_paths = path.split(":")
+                        if sub_paths[0] != download_dir:
+                            continue 
+                        in_path = True
                         download_dir = download_dir.replace(sub_paths[0], sub_paths[1]).replace('\\', '/')
 
+                if not in_path:
+                    logger.info(f"torrent {hash_str} not in library path, skip it.")
+                    continue
                 # 获取种子name
                 torrent_name = self.__get_torrent_name(torrent, downloader)
                 logger.info(f"torrent name: {torrent_name}")
