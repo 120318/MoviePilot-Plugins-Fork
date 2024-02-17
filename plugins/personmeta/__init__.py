@@ -288,7 +288,7 @@ class PersonMeta(_PluginBase):
             logger.info(f"演职人员刮削{mediainfo.title_year} 延迟 {self._delay}s")
             time.sleep(int(self._delay))
         # 查询媒体服务器中的条目
-        existsinfo = self.chain.media_exists(mediainfo=mediainfo, use_media_library=True)
+        existsinfo = self.chain.media_exists(mediainfo=mediainfo, use_media_server=True)
         if not existsinfo or not existsinfo.itemid:
             logger.warn(f"演职人员刮削 {mediainfo.title_year} 在媒体库中不存在，信息：{existsinfo}")
             return
