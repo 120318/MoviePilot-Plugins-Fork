@@ -39,7 +39,7 @@ class PersonMeta(_PluginBase):
     # 插件图标
     plugin_icon = "actor.png"
     # 插件版本
-    plugin_version = "1.1.2"
+    plugin_version = "1.1.3"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -288,7 +288,7 @@ class PersonMeta(_PluginBase):
             logger.info(f"演职人员刮削{mediainfo.title_year} 延迟 {self._delay}s")
             time.sleep(int(self._delay))
         # 查询媒体服务器中的条目
-        existsinfo = self.chain.media_exists(mediainfo=mediainfo)
+        existsinfo = self.chain.media_exists(mediainfo=mediainfo, use_media_library=True)
         if not existsinfo or not existsinfo.itemid:
             logger.warn(f"演职人员刮削 {mediainfo.title_year} 在媒体库中不存在，信息：{existsinfo}")
             return
