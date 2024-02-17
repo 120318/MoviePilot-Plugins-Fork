@@ -39,7 +39,7 @@ class PersonMeta(_PluginBase):
     # 插件图标
     plugin_icon = "actor.png"
     # 插件版本
-    plugin_version = "1.1"
+    plugin_version = "1.1.1"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -285,6 +285,7 @@ class PersonMeta(_PluginBase):
             return
         # 延迟
         if self._delay:
+            logger.info(f"演职人员刮削{mediainfo.title_year} 延迟 {self._delay}s")
             time.sleep(int(self._delay))
         # 查询媒体服务器中的条目
         existsinfo = self.chain.media_exists(mediainfo=mediainfo)
