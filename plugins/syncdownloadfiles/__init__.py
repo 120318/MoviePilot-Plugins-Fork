@@ -22,7 +22,7 @@ class SyncDownloadFiles(_PluginBase):
     # 插件图标
     plugin_icon = "Youtube-dl_A.png"
     # 插件版本
-    plugin_version = "1.0.1"
+    plugin_version = "1.0.2"
     # 插件作者
     plugin_author = "thsrite"
     # 作者主页
@@ -144,23 +144,27 @@ class SyncDownloadFiles(_PluginBase):
                 logger.info(f"torrent data: {torrent}")
                 sync_flag = self.__compare_time(torrent, downloader, last_sync_time)
 
+                logger.info(f"sync flag {sync_flag}")
                 if not sync_flag:
                     logger.info(f"最后同步时间{last_sync_time}, 之前种子已被同步，结束当前下载器 {downloader} 任务")
                     break
 
                 # 获取种子hash
                 hash_str = self.__get_hash(torrent, downloader)
+                logger.info(f"hash str{hash_str}")
 
                 # 判断是否是mp下载，判断download_hash是否在downloadhistory表中，是则不处理
                 downloadhis = self.downloadhis.get_by_hash(hash_str)
                 if downloadhis:
                     downlod_files = self.downloadhis.get_files_by_hash(hash_str)
+                    logger.info(f"download files: {download_files}")
                     if downlod_files:
                         logger.info(f"种子 {hash_str} 通过MoviePilot下载，跳过处理")
                         continue
 
                 # 获取种子download_dir
                 download_dir = self.__get_download_dir(torrent, downloader)
+                logger.info(f"download dir: {download_dir}")
 
                 # 处理路径映射
                 if self._dirs:
@@ -171,8 +175,10 @@ class SyncDownloadFiles(_PluginBase):
 
                 # 获取种子name
                 torrent_name = self.__get_torrent_name(torrent, downloader)
+                logger.info(f"torrent name: {torrent_name}")
                 # 种子保存目录
                 save_path = Path(download_dir).joinpath(torrent_name)
+                logger.info(f"save path: {save_path}")
                 # 获取种子文件
                 torrent_files = self.__get_torrent_files(torrent, downloader, downloader_obj)
                 logger.info(f"开始同步种子 {hash_str}, 文件数 {len(torrent_files)}")
