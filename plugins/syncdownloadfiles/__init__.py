@@ -23,7 +23,7 @@ class SyncDownloadFiles(_PluginBase):
     # 插件图标
     plugin_icon = "Youtube-dl_A.png"
     # 插件版本
-    plugin_version = "1.0.9"
+    plugin_version = "1.0.10"
     # 插件作者
     plugin_author = "thsrite"
     # 作者主页
@@ -209,14 +209,11 @@ class SyncDownloadFiles(_PluginBase):
                     if self._history:
                         # 判断是不是蓝光目录
                         full_path_str = str(full_path)
-                        logger.info(f"full path str: {full_path_str}")
                         if re.search(r"BDMV[/\\]STREAM", full_path_str, re.IGNORECASE):
                             # 截取BDMV前面的路径
                             full_path_str = full_path_str[:full_path_str.find("BDMV")]
-                            logger.info(f"full path str after handler: {full_path_str}")
-                            file_path = Path(full_path_str)
+                            full_path = Path(full_path_str)
                         transferhis = self.transferhis.get_by_src(str(full_path))
-                        logger.info(f'transfer history: {transferhis}')
                         if transferhis and not transferhis.download_hash:
                             logger.info(f"开始补充转移记录：{transferhis.id} download_hash {hash_str}")
                             self.transferhis.update_download_hash(historyid=transferhis.id,
