@@ -23,7 +23,7 @@ class SyncDownloadFiles(_PluginBase):
     # 插件图标
     plugin_icon = "Youtube-dl_A.png"
     # 插件版本
-    plugin_version = "1.0.8"
+    plugin_version = "1.0.9"
     # 插件作者
     plugin_author = "thsrite"
     # 作者主页
@@ -209,9 +209,11 @@ class SyncDownloadFiles(_PluginBase):
                     if self._history:
                         # 判断是不是蓝光目录
                         full_path_str = str(full_path)
+                        logger.info(f"full path str: {full_path_str}")
                         if re.search(r"BDMV[/\\]STREAM", full_path_str, re.IGNORECASE):
                             # 截取BDMV前面的路径
                             full_path_str = full_path_str[:full_path_str.find("BDMV")]
+                            logger.info(f"full path str after handler: {full_path_str}")
                             file_path = Path(full_path_str)
                         transferhis = self.transferhis.get_by_src(str(full_path))
                         logger.info(f'transfer history: {transferhis}')
@@ -303,18 +305,14 @@ class SyncDownloadFiles(_PluginBase):
             # 获取种子时间
             if dl_tpe == "qbittorrent":
                 torrent_date = time.gmtime(torrent.get("added_on"))  # 将时间戳转换为时间元组
-                logger.info(f"torrent date {torrent_date}")
                 torrent_date = time.strftime("%Y-%m-%d %H:%M:%S", torrent_date)  # 格式化时间
-                logger.info(f"torrent date {torrent_date}")
             else:
                 torrent_date = torrent.added_date
 
             # 之后的种子已经同步了
             if last_sync_time > str(torrent_date):
-                logger.info(1)
                 return False
 
-        logger.info(2)
         return True
 
     @staticmethod
