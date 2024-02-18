@@ -22,7 +22,7 @@ class SyncDownloadFiles(_PluginBase):
     # 插件图标
     plugin_icon = "Youtube-dl_A.png"
     # 插件版本
-    plugin_version = "1.0.6"
+    plugin_version = "1.0.7"
     # 插件作者
     plugin_author = "thsrite"
     # 作者主页
@@ -186,11 +186,14 @@ class SyncDownloadFiles(_PluginBase):
                 download_files = []
                 for file in torrent_files:
                     # 过滤掉没下载的文件
+                    logger.info(f'torrent file: {file}')
                     if not self.__is_download(file, downloader):
                         continue
                     # 种子文件路径
                     file_path_str = self.__get_file_path(file, downloader)
+                    logger.info(f'torrent file path str: {file_path_str}')
                     file_path = Path(file_path_str)
+                    logger.info(f'torrent file path: {file_path}')
                     # 只处理视频格式
                     if not file_path.suffix \
                             or file_path.suffix not in settings.RMT_MEDIAEXT:
@@ -203,9 +206,12 @@ class SyncDownloadFiles(_PluginBase):
                     else:
                         rel_path = str(file_path)
                     # 完整路径
+                    logger.info(f'rel path: {rel_path}')
                     full_path = save_path.joinpath(rel_path)
+                    logger.info(f'full path: {full_path}')
                     if self._history:
                         transferhis = self.transferhis.get_by_src(str(full_path))
+                        logger.info(f'transfer history: {transferhis}')
                         if transferhis and not transferhis.download_hash:
                             logger.info(f"开始补充转移记录：{transferhis.id} download_hash {hash_str}")
                             self.transferhis.update_download_hash(historyid=transferhis.id,
