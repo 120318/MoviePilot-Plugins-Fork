@@ -39,7 +39,7 @@ class PersonMeta(_PluginBase):
     # 插件图标
     plugin_icon = "actor.png"
     # 插件版本
-    plugin_version = "1.1.4"
+    plugin_version = "1.1.5"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -945,16 +945,15 @@ class PersonMeta(_PluginBase):
                 logger.error(f"更新Emby媒体项图片失败：{result}")
             return False
 
-        def __set_jellyfin_item_image():
+        def __set_jellyfin_item_image(_base64: str):
             """
             更新Jellyfin媒体项图片
             # FIXME 改为预下载图片
             """
             try:
-                url = f'[HOST]Items/{itemid}/RemoteImages/Download?' \
-                      f'Type=Primary&ImageUrl={imageurl}&ProviderName=TheMovieDb&api_key=[APIKEY]'
+                url = f'[HOST]Items/{itemid}/Images/Primary?api_key=[APIKEY]'
                 logger.info(f"Update item url: {url}")
-                res = Jellyfin().post_data(url=url)
+                res = Jellyfin().post_data(url=url, data=_base64, headers={"Content-Type": "image/png"})
                 if res and res.status_code in [200, 204]:
                     return True
                 else:
