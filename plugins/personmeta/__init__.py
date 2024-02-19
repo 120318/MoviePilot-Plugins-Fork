@@ -39,7 +39,7 @@ class PersonMeta(_PluginBase):
     # 插件图标
     plugin_icon = "actor.png"
     # 插件版本
-    plugin_version = "1.1.3"
+    plugin_version = "1.1.4"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -414,6 +414,7 @@ class PersonMeta(_PluginBase):
             # 获取豆瓣演员信息
             logger.info(f"开始获取 {item.title} 的豆瓣演员信息 ...")
             douban_actors = self.__get_douban_actors(mediainfo=mediainfo, season=season)
+            logger.info(f"获取 {item.title} 的豆瓣演员信息为 {douban_actors}")
             self.__update_peoples(server=server, itemid=item.item_id, iteminfo=iteminfo, douban_actors=douban_actors)
         else:
             logger.info(f"{item.title} 的人物信息已是中文，无需更新")
@@ -491,7 +492,7 @@ class PersonMeta(_PluginBase):
             # 查询媒体库人物详情
             personinfo = self.get_iteminfo(server=server, itemid=people.get("Id"))
             if not personinfo:
-                logger.debug(f"未找到人物 {people.get('Name')} 的信息")
+                logger.info(f"未找到人物 {people.get('Name')} 的信息")
                 return None
 
             # 是否更新标志
@@ -508,20 +509,20 @@ class PersonMeta(_PluginBase):
                     cn_name = self.__get_chinese_name(person_tmdbinfo)
                     if cn_name:
                         # 更新中文名
-                        logger.debug(f"{people.get('Name')} 从TMDB获取到中文名：{cn_name}")
+                        logger.info(f"{people.get('Name')} 从TMDB获取到中文名：{cn_name}")
                         personinfo["Name"] = cn_name
                         ret_people["Name"] = cn_name
                         updated_name = True
                         # 更新中文描述
                         biography = person_tmdbinfo.get("biography")
                         if biography and StringUtils.is_chinese(biography):
-                            logger.debug(f"{people.get('Name')} 从TMDB获取到中文描述")
+                            logger.info(f"{people.get('Name')} 从TMDB获取到中文描述")
                             personinfo["Overview"] = biography
                             updated_overview = True
                         # 图片
                         profile_path = person_tmdbinfo.get('profile_path')
                         if profile_path:
-                            logger.debug(f"{people.get('Name')} 从TMDB获取到图片：{profile_path}")
+                            logger.info(f"{people.get('Name')} 从TMDB获取到图片：{profile_path}")
                             profile_path = f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/original{profile_path}"
 
             # 从豆瓣信息中更新人物信息
@@ -557,14 +558,14 @@ class PersonMeta(_PluginBase):
                             or douban_actor.get("name") == people.get("Name"):
                         # 名称
                         if not updated_name:
-                            logger.debug(f"{people.get('Name')} 从豆瓣中获取到中文名：{douban_actor.get('name')}")
+                            logger.info(f"{people.get('Name')} 从豆瓣中获取到中文名：{douban_actor.get('name')}")
                             personinfo["Name"] = douban_actor.get("name")
                             ret_people["Name"] = douban_actor.get("name")
                             updated_name = True
                         # 描述
                         if not updated_overview:
                             if douban_actor.get("title"):
-                                logger.debug(f"{people.get('Name')} 从豆瓣中获取到中文描述：{douban_actor.get('title')}")
+                                logger.info(f"{people.get('Name')} 从豆瓣中获取到中文描述：{douban_actor.get('title')}")
                                 personinfo["Overview"] = douban_actor.get("title")
                                 updated_overview = True
                         # 饰演角色
@@ -576,20 +577,20 @@ class PersonMeta(_PluginBase):
                                 character = re.sub("演员", "",
                                                    character)
                                 if character:
-                                    logger.debug(f"{people.get('Name')} 从豆瓣中获取到饰演角色：{character}")
+                                    logger.info(f"{people.get('Name')} 从豆瓣中获取到饰演角色：{character}")
                                     ret_people["Role"] = character
                                     update_character = True
                         # 图片
                         if not profile_path:
                             avatar = douban_actor.get("avatar") or {}
                             if avatar.get("large"):
-                                logger.debug(f"{people.get('Name')} 从豆瓣中获取到图片：{avatar.get('large')}")
+                                logger.info(f"{people.get('Name')} 从豆瓣中获取到图片：{avatar.get('large')}")
                                 profile_path = avatar.get("large")
                         break
 
             # 更新人物图片
             if profile_path:
-                logger.debug(f"更新人物 {people.get('Name')} 的图片：{profile_path}")
+                logger.info(f"更新人物 {people.get('Name')} 的图片：{profile_path}")
                 self.set_item_image(server=server, itemid=people.get("Id"), imageurl=profile_path)
 
             # 锁定人物信息
@@ -602,12 +603,12 @@ class PersonMeta(_PluginBase):
 
             # 更新人物信息
             if updated_name or updated_overview or update_character:
-                logger.debug(f"更新人物 {people.get('Name')} 的信息：{personinfo}")
+                logger.info(f"更新人物 {people.get('Name')} 的信息：{personinfo}")
                 ret = self.set_iteminfo(server=server, itemid=people.get("Id"), iteminfo=personinfo)
                 if ret:
                     return ret_people
             else:
-                logger.debug(f"人物 {people.get('Name')} 未找到中文数据")
+                logger.info(f"人物 {people.get('Name')} 未找到中文数据")
         except Exception as err:
             logger.error(f"更新人物信息失败：{str(err)}")
         return None
@@ -618,7 +619,7 @@ class PersonMeta(_PluginBase):
         """
         # 随机休眠 3-10 秒
         sleep_time = 3 + int(time.time()) % 7
-        logger.debug(f"随机休眠 {sleep_time}秒 ...")
+        logger.info(f"随机休眠 {sleep_time}秒 ...")
         time.sleep(sleep_time)
         # 匹配豆瓣信息
         doubaninfo = self.chain.match_doubaninfo(name=mediainfo.title,
@@ -631,7 +632,7 @@ class PersonMeta(_PluginBase):
             doubanitem = self.chain.douban_info(doubaninfo.get("id")) or {}
             return (doubanitem.get("actors") or []) + (doubanitem.get("directors") or [])
         else:
-            logger.debug(f"未找到豆瓣信息：{mediainfo.title_year}")
+            logger.info(f"未找到豆瓣信息：{mediainfo.title_year}")
         return []
 
     @staticmethod
@@ -952,6 +953,7 @@ class PersonMeta(_PluginBase):
             try:
                 url = f'[HOST]Items/{itemid}/RemoteImages/Download?' \
                       f'Type=Primary&ImageUrl={imageurl}&ProviderName=TheMovieDb&api_key=[APIKEY]'
+                logger.info(f"Update item url: {url}")
                 res = Jellyfin().post_data(url=url)
                 if res and res.status_code in [200, 204]:
                     return True
