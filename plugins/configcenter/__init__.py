@@ -17,7 +17,7 @@ class ConfigCenter(_PluginBase):
     # 插件图标
     plugin_icon = "setting.png"
     # 插件版本
-    plugin_version = "2.1"
+    plugin_version = "2.5"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -37,7 +37,8 @@ class ConfigCenter(_PluginBase):
         "GITHUB_TOKEN", "API_TOKEN", "TMDB_API_DOMAIN", "TMDB_IMAGE_DOMAIN", "WALLPAPER",
         "RECOGNIZE_SOURCE", "SCRAP_FOLLOW_TMDB", "AUTO_DOWNLOAD_USER",
         "OCR_HOST", "DOWNLOAD_SUBTITLE", "PLUGIN_MARKET", "MOVIE_RENAME_FORMAT",
-        "TV_RENAME_FORMAT", "FANART_ENABLE"
+        "TV_RENAME_FORMAT", "FANART_ENABLE", "DOH_ENABLE", "SEARCH_MULTIPLE_NAME", "META_CACHE_EXPIRE",
+        "GITHUB_PROXY"
     ]
 
     def init_plugin(self, config: dict = None):
@@ -53,7 +54,7 @@ class ConfigCenter(_PluginBase):
             setattr(settings, attribute, config.get(attribute) or getattr(settings, attribute))
         # 自定义配置，以换行分隔
         self._params = config.get("params") or ""
-        for key, value in self.__parse_params(self._params):
+        for key, value in self.__parse_params(self._params).items():
             if hasattr(settings, key):
                 setattr(settings, key, str(value))
 
@@ -85,17 +86,13 @@ class ConfigCenter(_PluginBase):
         # 自定义配置，以换行分隔
         config_params = self.__parse_params(conf.get("params"))
         conf.update(config_params)
-        # 去掉无效参数
-        try:
-            conf.pop("enabled")
-            conf.pop("writeenv")
-            conf.pop("params")
-        except KeyError:
-            pass
         # 读写app.env
         env_path = settings.CONFIG_PATH / "app.env"
         for key, value in conf.items():
             if not key:
+                continue
+            # 如果参数不在支持列表中, 则跳过
+            if key not in self.settings_attributes and key not in config_params:
                 continue
             if value is None or str(value) == "None":
                 value = ''
@@ -103,7 +100,7 @@ class ConfigCenter(_PluginBase):
                 value = str(value)
             set_key(env_path, key, value)
         logger.info("app.env文件写入完成")
-        self.systemmessage.put("配置中心设置已写入app.env文件，插件关闭")
+        self.systemmessage.put("配置中心设置已写入app.env文件，插件关闭", title="配置中心")
 
     @staticmethod
     def __parse_params(param_str: str) -> dict:
@@ -318,53 +315,12 @@ class ConfigCenter(_PluginBase):
                                         }
                                     }
                                 ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                "component": "VCol",
-                                "props": {
-                                    "cols": 12,
-                                    "md": 6
-                                },
-                                "content": [
-                                    {
-                                        "component": "VSwitch",
-                                        "props": {
-                                            "model": "SCRAP_FOLLOW_TMDB",
-                                            "label": "新增入库跟随TMDB信息变化"
-                                        }
-                                    }
-                                ]
                             },
                             {
                                 "component": "VCol",
                                 "props": {
                                     "cols": 12,
                                     "md": 6
-                                },
-                                "content": [
-                                    {
-                                        "component": "VSwitch",
-                                        "props": {
-                                            "model": "FANART_ENABLE",
-                                            "label": "使用Fanart图片数据源"
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                "component": "VCol",
-                                "props": {
-                                    "cols": 12
                                 },
                                 "content": [
                                     {
@@ -385,14 +341,14 @@ class ConfigCenter(_PluginBase):
                                 "component": "VCol",
                                 "props": {
                                     "cols": 12,
-                                    "md": 6
                                 },
                                 "content": [
                                     {
-                                        "component": "VSwitch",
+                                        "component": "VTextField",
                                         "props": {
-                                            "model": "DOWNLOAD_SUBTITLE",
-                                            "label": "自动下载站点字幕"
+                                            "model": "GITHUB_PROXY",
+                                            "label": "Github加速服务器",
+                                            "placeholder": "https://mirror.ghproxy.com/"
                                         }
                                     }
                                 ]
@@ -475,6 +431,91 @@ class ConfigCenter(_PluginBase):
                                             "model": "params",
                                             "label": "自定义配置",
                                             "placeholder": "每行一个配置项，格式：配置项=值"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                "component": "VCol",
+                                "props": {
+                                    "cols": 12,
+                                    "md": 4
+                                },
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "DOWNLOAD_SUBTITLE",
+                                            "label": "自动下载站点字幕"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {
+                                    "cols": 12,
+                                    "md": 4
+                                },
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "SCRAP_FOLLOW_TMDB",
+                                            "label": "新增入库跟随TMDB信息变化"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {
+                                    "cols": 12,
+                                    "md": 4
+                                },
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "FANART_ENABLE",
+                                            "label": "使用Fanart图片数据源"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {
+                                    "cols": 12,
+                                    "md": 4
+                                },
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "DOH_ENABLE",
+                                            "label": "启用DNS over HTTPS"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {
+                                    "cols": 12,
+                                    "md": 4
+                                },
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "SEARCH_MULTIPLE_NAME",
+                                            "label": "资源搜索整合多名称搜索结果"
                                         }
                                     }
                                 ]

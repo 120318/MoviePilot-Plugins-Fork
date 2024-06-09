@@ -6,6 +6,9 @@ from typing import Optional, Any, List, Dict, Tuple
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+
+from app import schemas
+from app.chain.media import MediaChain
 from app.schemas.types import MediaType
 
 from app.chain.download import DownloadChain
@@ -31,7 +34,7 @@ class DoubanSync(_PluginBase):
     # 插件图标
     plugin_icon = "douban.png"
     # 插件版本
-    plugin_version = "1.2"
+    plugin_version = "1.8"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -51,6 +54,7 @@ class DoubanSync(_PluginBase):
     downloadchain = None
     searchchain = None
     subscribechain = None
+    mediachain = None
 
     # 配置属性
     _enabled: bool = False
@@ -67,6 +71,7 @@ class DoubanSync(_PluginBase):
         self.downloadchain = DownloadChain()
         self.searchchain = SearchChain()
         self.subscribechain = SubscribeChain()
+        self.mediachain = MediaChain()
 
         # 停止现有任务
         self.stop_service()
@@ -82,26 +87,18 @@ class DoubanSync(_PluginBase):
             self._clear = config.get("clear")
 
         if self._enabled or self._onlyonce:
-
-            self._scheduler = BackgroundScheduler(timezone=settings.TZ)
-            if self._cron:
-                try:
-                    self._scheduler.add_job(func=self.sync,
-                                            trigger=CronTrigger.from_crontab(self._cron),
-                                            name="豆瓣想看")
-                except Exception as err:
-                    logger.error(f"定时任务配置错误：{str(err)}")
-                    # 推送实时消息
-                    self.systemmessage.put(f"执行周期配置错误：{str(err)}")
-            else:
-                self._scheduler.add_job(self.sync, "interval", minutes=30, name="豆瓣想看")
-
             if self._onlyonce:
+                self._scheduler = BackgroundScheduler(timezone=settings.TZ)
                 logger.info(f"豆瓣想看服务启动，立即运行一次")
                 self._scheduler.add_job(func=self.sync, trigger='date',
                                         run_date=datetime.datetime.now(
                                             tz=pytz.timezone(settings.TZ)) + datetime.timedelta(seconds=3)
                                         )
+
+                # 启动任务
+                if self._scheduler.get_jobs():
+                    self._scheduler.print_jobs()
+                    self._scheduler.start()
 
             if self._onlyonce or self._clear:
                 # 关闭一次性开关
@@ -112,11 +109,6 @@ class DoubanSync(_PluginBase):
                 self._clear = False
                 # 保存配置
                 self.__update_config()
-
-            # 启动任务
-            if self._scheduler.get_jobs():
-                self._scheduler.print_jobs()
-                self._scheduler.start()
 
     def get_state(self) -> bool:
         return self._enabled
@@ -147,7 +139,47 @@ class DoubanSync(_PluginBase):
             "summary": "API说明"
         }]
         """
-        pass
+        return [
+            {
+                "path": "/delete_history",
+                "endpoint": self.delete_history,
+                "methods": ["GET"],
+                "summary": "删除豆瓣同步历史记录"
+            }
+        ]
+
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册插件公共服务
+        [{
+            "id": "服务ID",
+            "name": "服务名称",
+            "trigger": "触发器：cron/interval/date/CronTrigger.from_crontab()",
+            "func": self.xxx,
+            "kwargs": {} # 定时器参数
+        }]
+        """
+        if self._enabled and self._cron:
+            return [
+                {
+                    "id": "DoubanSync",
+                    "name": "豆瓣想看同步服务",
+                    "trigger": CronTrigger.from_crontab(self._cron),
+                    "func": self.sync,
+                    "kwargs": {}
+                }
+            ]
+        elif self._enabled:
+            return [
+                {
+                    "id": "DoubanSync",
+                    "name": "豆瓣想看同步服务",
+                    "trigger": "interval",
+                    "func": self.sync,
+                    "kwargs": {"minutes": 30}
+                }
+            ]
+        return []
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
@@ -330,6 +362,22 @@ class DoubanSync(_PluginBase):
                     'component': 'VCard',
                     'content': [
                         {
+                            "component": "VDialogCloseBtn",
+                            "props": {
+                                'innerClass': 'absolute top-0 right-0',
+                            },
+                            'events': {
+                                'click': {
+                                    'api': 'plugin/DoubanSync/delete_history',
+                                    'method': 'get',
+                                    'params': {
+                                        'doubanid': doubanid,
+                                        'apikey': settings.API_TOKEN
+                                    }
+                                }
+                            },
+                        },
+                        {
                             'component': 'div',
                             'props': {
                                 'class': 'd-flex justify-space-start flex-nowrap flex-row',
@@ -355,9 +403,9 @@ class DoubanSync(_PluginBase):
                                     'component': 'div',
                                     'content': [
                                         {
-                                            'component': 'VCardSubtitle',
+                                            'component': 'VCardTitle',
                                             'props': {
-                                                'class': 'pa-2 font-bold break-words whitespace-break-spaces'
+                                                'class': 'ps-1 pe-5 break-words whitespace-break-spaces'
                                             },
                                             'content': [
                                                 {
@@ -416,6 +464,21 @@ class DoubanSync(_PluginBase):
             "clear": self._clear
         })
 
+    def delete_history(self, doubanid: str, apikey: str):
+        """
+        删除同步历史记录
+        """
+        if apikey != settings.API_TOKEN:
+            return schemas.Response(success=False, message="API密钥错误")
+        # 历史记录
+        historys = self.get_data('history')
+        if not historys:
+            return schemas.Response(success=False, message="未找到历史记录")
+        # 删除指定记录
+        historys = [h for h in historys if h.get("doubanid") != doubanid]
+        self.save_data('history', historys)
+        return schemas.Response(success=True, message="删除成功")
+
     def stop_service(self):
         """
         退出插件
@@ -457,8 +520,8 @@ class DoubanSync(_PluginBase):
                 try:
                     dtype = result.get("title", "")[:2]
                     title = result.get("title", "")[2:]
-                    if dtype not in ["想看", "在看"]:
-                        logger.info(f'标题：{title}，非想看/在看数据，跳过')
+                    if dtype not in ["想看"]:
+                        logger.info(f'标题：{title}，非想看数据，跳过')
                         continue
                     if not result.get("link"):
                         logger.warn(f'标题：{title}，未获取到链接，跳过')
@@ -477,53 +540,37 @@ class DoubanSync(_PluginBase):
                     # 识别媒体信息
                     meta = MetaInfo(title=title)
                     douban_info = self.chain.douban_info(doubanid=douban_id)
-                    meta.year = douban_info.get("year")
                     meta.type = MediaType.MOVIE if douban_info.get("type") == "movie" else MediaType.TV
-                    mediainfo = self.chain.recognize_media(meta=meta, doubanid=douban_id)
-                    if not mediainfo:
-                        logger.warn(f'未识别到媒体信息，标题：{title}，豆瓣ID：{douban_id}')
-                        continue
+                    if settings.RECOGNIZE_SOURCE == "themoviedb":
+                        tmdbinfo = self.mediachain.get_tmdbinfo_by_doubanid(doubanid=douban_id, mtype=meta.type)
+                        if not tmdbinfo:
+                            logger.warn(f'未能通过豆瓣ID {douban_id} 获取到TMDB信息，标题：{title}，豆瓣ID：{douban_id}')
+                            continue
+                        mediainfo = self.chain.recognize_media(meta=meta, tmdbid=tmdbinfo.get("id"))
+                        if not mediainfo:
+                            logger.warn(f'TMDBID {tmdbinfo.get("id")} 未识别到媒体信息')
+                            continue
+                    else:
+                        mediainfo = self.chain.recognize_media(meta=meta, doubanid=douban_id)
+                        if not mediainfo:
+                            logger.warn(f'豆瓣ID {douban_id} 未识别到媒体信息')
+                            continue
                     # 查询缺失的媒体信息
                     exist_flag, no_exists = self.downloadchain.get_no_exists_info(meta=meta, mediainfo=mediainfo)
                     if exist_flag:
                         logger.info(f'{mediainfo.title_year} 媒体库中已存在')
                         action = "exist"
                     else:
-                        logger.info(f'{mediainfo.title_year} 媒体库中不存在，开始搜索 ...')
-                        # 搜索
-                        contexts = self.searchchain.process(mediainfo=mediainfo,
-                                                            no_exists=no_exists)
-                        if not contexts:
-                            logger.warn(f'{mediainfo.title_year} 未搜索到资源')
-                            # 添加订阅
-                            self.subscribechain.add(title=mediainfo.title,
-                                                    year=mediainfo.year,
-                                                    mtype=mediainfo.type,
-                                                    tmdbid=mediainfo.tmdb_id,
-                                                    season=meta.begin_season,
-                                                    exist_ok=True,
-                                                    username="豆瓣想看")
-                            action = "subscribe"
-                        else:
-                            # 自动下载
-                            downloads, lefts = self.downloadchain.batch_download(contexts=contexts, no_exists=no_exists,
-                                                                                 username="豆瓣想看")
-                            if downloads and not lefts:
-                                # 全部下载完成
-                                logger.info(f'{mediainfo.title_year} 下载完成')
-                                action = "download"
-                            else:
-                                # 未完成下载
-                                logger.info(f'{mediainfo.title_year} 未下载未完整，添加订阅 ...')
-                                # 添加订阅
-                                self.subscribechain.add(title=mediainfo.title,
-                                                        year=mediainfo.year,
-                                                        mtype=mediainfo.type,
-                                                        tmdbid=mediainfo.tmdb_id,
-                                                        season=meta.begin_season,
-                                                        exist_ok=True,
-                                                        username="豆瓣想看")
-                                action = "subscribe"
+                        # 添加订阅
+                        logger.info(f'{mediainfo.title_year} 媒体库中不存在或不完整，添加订阅 ...')
+                        self.subscribechain.add(title=mediainfo.title,
+                                                year=mediainfo.year,
+                                                mtype=mediainfo.type,
+                                                tmdbid=mediainfo.tmdb_id,
+                                                season=meta.begin_season,
+                                                exist_ok=True,
+                                                username="豆瓣想看")
+                        action = "subscribe"
                     # 存储历史记录
                     history.append({
                         "action": action,

@@ -61,6 +61,9 @@ class NexusPhpSiteUserInfo(ISiteUserInfo):
                 self.message_unread = StringUtils.str_int(message_text)
 
     def _parse_user_base_info(self, html_text: str):
+        """
+        解析用户基本信息
+        """
         # 合并解析，减少额外请求调用
         self._parse_user_traffic_info(html_text)
         self._user_traffic_page = None
@@ -85,6 +88,9 @@ class NexusPhpSiteUserInfo(ISiteUserInfo):
             return
 
     def _parse_user_traffic_info(self, html_text):
+        """
+        解析用户流量信息
+        """
         html_text = self._prepare_html_text(html_text)
         upload_match = re.search(r"[^总]上[传傳]量?[:：_<>/a-zA-Z-=\"'\s#;]+([\d,.\s]+[KMGTPI]*B)", html_text,
                                  re.IGNORECASE)
@@ -211,7 +217,7 @@ class NexusPhpSiteUserInfo(ISiteUserInfo):
 
         # 是否存在下页数据
         next_page = None
-        next_page_text = html.xpath('//a[contains(.//text(), "下一页") or contains(.//text(), "下一頁")]/@href')
+        next_page_text = html.xpath('//a[contains(.//text(), "下一页") or contains(.//text(), "下一頁") or contains(.//text(), ">")]/@href')
         if next_page_text:
             next_page = next_page_text[-1].strip()
             # fix up page url

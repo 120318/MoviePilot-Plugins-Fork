@@ -14,6 +14,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from requests import RequestException
 
+from app import schemas
 from app.chain.mediaserver import MediaServerChain
 from app.chain.tmdb import TmdbChain
 from app.core.config import settings
@@ -39,7 +40,7 @@ class PersonMeta(_PluginBase):
     # 插件图标
     plugin_icon = "actor.png"
     # 插件版本
-    plugin_version = "1.1.5"
+    plugin_version = "1.3"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -80,31 +81,19 @@ class PersonMeta(_PluginBase):
         self.stop_service()
 
         # 启动服务
-        if self._enabled or self._onlyonce:
+        if self._onlyonce:
             self._scheduler = BackgroundScheduler(timezone=settings.TZ)
-            if self._cron or self._onlyonce:
-                if self._cron:
-                    try:
-                        self._scheduler.add_job(func=self.scrap_library,
-                                                trigger=CronTrigger.from_crontab(self._cron),
-                                                name="演职人员刮削")
-                        logger.info(f"演职人员刮削服务启动，周期：{self._cron}")
-                    except Exception as e:
-                        logger.error(f"演职人员刮削服务启动失败，错误信息：{str(e)}")
-                        self.systemmessage.put(f"演职人员刮削服务启动失败，错误信息：{str(e)}")
-                if self._onlyonce:
-                    self._scheduler.add_job(func=self.scrap_library, trigger='date',
-                                            run_date=datetime.datetime.now(
-                                                tz=pytz.timezone(settings.TZ)) + datetime.timedelta(seconds=3)
-                                            )
-                    logger.info(f"演职人员刮削服务启动，立即运行一次")
-                    # 关闭一次性开关
-                    self._onlyonce = False
-                    # 保存配置
-                    self.__update_config()
-
+            self._scheduler.add_job(func=self.scrap_library, trigger='date',
+                                    run_date=datetime.datetime.now(
+                                        tz=pytz.timezone(settings.TZ)) + datetime.timedelta(seconds=3)
+                                    )
+            logger.info(f"演职人员刮削服务启动，立即运行一次")
+            # 关闭一次性开关
+            self._onlyonce = False
+            # 保存配置
+            self.__update_config()
+            # 启动服务
             if self._scheduler.get_jobs():
-                # 启动服务
                 self._scheduler.print_jobs()
                 self._scheduler.start()
 
@@ -130,6 +119,26 @@ class PersonMeta(_PluginBase):
 
     def get_api(self) -> List[Dict[str, Any]]:
         pass
+
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册插件公共服务
+        [{
+            "id": "服务ID",
+            "name": "服务名称",
+            "trigger": "触发器：cron/interval/date/CronTrigger.from_crontab()",
+            "func": self.xxx,
+            "kwargs": {} # 定时器参数
+        }]
+        """
+        if self._enabled and self._cron:
+            return [{
+                "id": "PersonMeta",
+                "name": "演职人员刮削服务",
+                "trigger": CronTrigger.from_crontab(self._cron),
+                "func": self.scrap_library,
+                "kwargs": {}
+            }]
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
@@ -504,9 +513,9 @@ class PersonMeta(_PluginBase):
             # 从TMDB信息中更新人物信息
             person_tmdbid, person_imdbid = __get_peopleid(personinfo)
             if person_tmdbid:
-                person_tmdbinfo = self.tmdbchain.person_detail(int(person_tmdbid))
-                if person_tmdbinfo:
-                    cn_name = self.__get_chinese_name(person_tmdbinfo)
+                person_detail = self.tmdbchain.person_detail(int(person_tmdbid))
+                if person_detail:
+                    cn_name = self.__get_chinese_name(person_detail)
                     if cn_name:
                         # 更新中文名
                         logger.info(f"{people.get('Name')} 从TMDB获取到中文名：{cn_name}")
@@ -514,13 +523,13 @@ class PersonMeta(_PluginBase):
                         ret_people["Name"] = cn_name
                         updated_name = True
                         # 更新中文描述
-                        biography = person_tmdbinfo.get("biography")
+                        biography = person_detail.biography
                         if biography and StringUtils.is_chinese(biography):
                             logger.info(f"{people.get('Name')} 从TMDB获取到中文描述")
                             personinfo["Overview"] = biography
                             updated_overview = True
                         # 图片
-                        profile_path = person_tmdbinfo.get('profile_path')
+                        profile_path = person_detail.profile_path
                         if profile_path:
                             logger.info(f"{people.get('Name')} 从TMDB获取到图片：{profile_path}")
                             profile_path = f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/original{profile_path}"
@@ -988,12 +997,12 @@ class PersonMeta(_PluginBase):
         return None
 
     @staticmethod
-    def __get_chinese_name(personinfo: dict) -> str:
+    def __get_chinese_name(personinfo: schemas.MediaPerson) -> str:
         """
         获取TMDB别名中的中文名
         """
         try:
-            also_known_as = personinfo.get("also_known_as") or []
+            also_known_as = personinfo.also_known_as or []
             if also_known_as:
                 for name in also_known_as:
                     if name and StringUtils.is_chinese(name):

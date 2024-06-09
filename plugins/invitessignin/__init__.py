@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from datetime import datetime, timedelta
 
 import pytz
@@ -22,7 +23,7 @@ class InvitesSignin(_PluginBase):
     # 插件图标
     plugin_icon = "invites.png"
     # 插件版本
-    plugin_version = "1.2"
+    plugin_version = "1.4"
     # 插件作者
     plugin_author = "thsrite"
     # 作者主页
@@ -41,6 +42,7 @@ class InvitesSignin(_PluginBase):
     _cookie = None
     _onlyonce = False
     _notify = False
+    _history_days = None
 
     # 定时器
     _scheduler: Optional[BackgroundScheduler] = None
@@ -55,34 +57,25 @@ class InvitesSignin(_PluginBase):
             self._cookie = config.get("cookie")
             self._notify = config.get("notify")
             self._onlyonce = config.get("onlyonce")
+            self._history_days = config.get("history_days") or 30
 
-            # 加载模块
-        if self._enabled:
+        if self._onlyonce:
             # 定时服务
             self._scheduler = BackgroundScheduler(timezone=settings.TZ)
-
-            if self._cron:
-                try:
-                    self._scheduler.add_job(func=self.__signin,
-                                            trigger=CronTrigger.from_crontab(self._cron),
-                                            name="药丸签到")
-                except Exception as err:
-                    logger.error(f"定时任务配置错误：{str(err)}")
-
-            if self._onlyonce:
-                logger.info(f"药丸签到服务启动，立即运行一次")
-                self._scheduler.add_job(func=self.__signin, trigger='date',
-                                        run_date=datetime.now(tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3),
-                                        name="药丸签到")
-                # 关闭一次性开关
-                self._onlyonce = False
-                self.update_config({
-                    "onlyonce": False,
-                    "cron": self._cron,
-                    "enabled": self._enabled,
-                    "cookie": self._cookie,
-                    "notify": self._notify,
-                })
+            logger.info(f"药丸签到服务启动，立即运行一次")
+            self._scheduler.add_job(func=self.__signin, trigger='date',
+                                    run_date=datetime.now(tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3),
+                                    name="药丸签到")
+            # 关闭一次性开关
+            self._onlyonce = False
+            self.update_config({
+                "onlyonce": False,
+                "cron": self._cron,
+                "enabled": self._enabled,
+                "cookie": self._cookie,
+                "notify": self._notify,
+                "history_days": self._history_days,
+            })
 
             # 启动任务
             if self._scheduler.get_jobs():
@@ -170,6 +163,11 @@ class InvitesSignin(_PluginBase):
             "totalContinuousCheckIn": totalContinuousCheckIn,
             "money": money
         })
+
+        thirty_days_ago = time.time() - int(self._history_days) * 24 * 60 * 60
+        history = [record for record in history if
+                   datetime.strptime(record["date"],
+                                     '%Y-%m-%d %H:%M:%S').timestamp() >= thirty_days_ago]
         # 保存签到历史
         self.save_data(key="history", value=history)
 
@@ -182,6 +180,27 @@ class InvitesSignin(_PluginBase):
 
     def get_api(self) -> List[Dict[str, Any]]:
         pass
+
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册插件公共服务
+        [{
+            "id": "服务ID",
+            "name": "服务名称",
+            "trigger": "触发器：cron/interval/date/CronTrigger.from_crontab()",
+            "func": self.xxx,
+            "kwargs": {} # 定时器参数
+        }]
+        """
+        if self._enabled and self._cron:
+            return [{
+                "id": "InvitesSignin",
+                "name": "药丸签到服务",
+                "trigger": CronTrigger.from_crontab(self._cron),
+                "func": self.__signin,
+                "kwargs": {}
+            }]
+        return []
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
@@ -251,7 +270,7 @@ class InvitesSignin(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 6
+                                    'md': 3
                                 },
                                 'content': [
                                     {
@@ -259,6 +278,22 @@ class InvitesSignin(_PluginBase):
                                         'props': {
                                             'model': 'cron',
                                             'label': '签到周期'
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                    'md': 3
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VTextField',
+                                        'props': {
+                                            'model': 'history_days',
+                                            'label': '保留历史天数'
                                         }
                                     }
                                 ]
@@ -309,6 +344,7 @@ class InvitesSignin(_PluginBase):
             "onlyonce": False,
             "notify": False,
             "cookie": "",
+            "history_days": 30,
             "cron": "0 9 * * *"
         }
 

@@ -8,13 +8,16 @@ import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from app import schemas
 from app.chain.download import DownloadChain
+from app.chain.media import MediaChain
 from app.chain.subscribe import SubscribeChain
 from app.core.config import settings
 from app.core.context import MediaInfo
 from app.core.metainfo import MetaInfo
 from app.log import logger
 from app.plugins import _PluginBase
+from app.schemas import MediaType
 from app.utils.dom import DomUtils
 from app.utils.http import RequestUtils
 
@@ -27,7 +30,7 @@ class DoubanRank(_PluginBase):
     # 插件图标
     plugin_icon = "movie.jpg"
     # 插件版本
-    plugin_version = "1.4"
+    plugin_version = "1.9.1"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -44,6 +47,7 @@ class DoubanRank(_PluginBase):
     # 私有属性
     downloadchain: DownloadChain = None
     subscribechain: SubscribeChain = None
+    mediachain: MediaChain = None
     _scheduler = None
     _douban_address = {
         'movie-ustop': 'https://rsshub.app/douban/movie/ustop',
@@ -53,6 +57,7 @@ class DoubanRank(_PluginBase):
         'movie-hot-gaia': 'https://rsshub.app/douban/movie/weekly/movie_hot_gaia',
         'tv-hot': 'https://rsshub.app/douban/movie/weekly/tv_hot',
         'movie-top250': 'https://rsshub.app/douban/movie/weekly/movie_top250',
+        'movie-top250-full': 'https://rsshub.app/douban/list/movie_top250',
     }
     _enabled = False
     _cron = ""
@@ -67,6 +72,7 @@ class DoubanRank(_PluginBase):
     def init_plugin(self, config: dict = None):
         self.downloadchain = DownloadChain()
         self.subscribechain = SubscribeChain()
+        self.mediachain = MediaChain()
 
         if config:
             self._enabled = config.get("enabled")
@@ -90,27 +96,18 @@ class DoubanRank(_PluginBase):
 
         # 启动服务
         if self._enabled or self._onlyonce:
-            self._scheduler = BackgroundScheduler(timezone=settings.TZ)
-            if self._cron:
-                logger.info(f"豆瓣榜单订阅服务启动，周期：{self._cron}")
-                try:
-                    self._scheduler.add_job(func=self.__refresh_rss,
-                                            trigger=CronTrigger.from_crontab(self._cron),
-                                            name="豆瓣榜单订阅")
-                except Exception as e:
-                    logger.error(f"豆瓣榜单订阅服务启动失败，错误信息：{str(e)}")
-                    self.systemmessage.put(f"豆瓣榜单订阅服务启动失败，错误信息：{str(e)}")
-            else:
-                self._scheduler.add_job(func=self.__refresh_rss, trigger=CronTrigger.from_crontab("0 8 * * *"),
-                                        name="豆瓣榜单订阅")
-                logger.info("豆瓣榜单订阅服务启动，周期：每天 08:00")
-
             if self._onlyonce:
+                self._scheduler = BackgroundScheduler(timezone=settings.TZ)
                 logger.info("豆瓣榜单订阅服务启动，立即运行一次")
                 self._scheduler.add_job(func=self.__refresh_rss, trigger='date',
                                         run_date=datetime.datetime.now(
                                             tz=pytz.timezone(settings.TZ)) + datetime.timedelta(seconds=3)
                                         )
+
+                if self._scheduler.get_jobs():
+                    # 启动服务
+                    self._scheduler.print_jobs()
+                    self._scheduler.start()
 
             if self._onlyonce or self._clear:
                 # 关闭一次性开关
@@ -122,11 +119,6 @@ class DoubanRank(_PluginBase):
                 # 保存配置
                 self.__update_config()
 
-            if self._scheduler.get_jobs():
-                # 启动服务
-                self._scheduler.print_jobs()
-                self._scheduler.start()
-
     def get_state(self) -> bool:
         return self._enabled
 
@@ -135,7 +127,56 @@ class DoubanRank(_PluginBase):
         pass
 
     def get_api(self) -> List[Dict[str, Any]]:
-        pass
+        """
+        获取插件API
+        [{
+            "path": "/xx",
+            "endpoint": self.xxx,
+            "methods": ["GET", "POST"],
+            "summary": "API说明"
+        }]
+        """
+        return [
+            {
+                "path": "/delete_history",
+                "endpoint": self.delete_history,
+                "methods": ["GET"],
+                "summary": "删除豆瓣榜单订阅历史记录"
+            }
+        ]
+
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册插件公共服务
+        [{
+            "id": "服务ID",
+            "name": "服务名称",
+            "trigger": "触发器：cron/interval/date/CronTrigger.from_crontab()",
+            "func": self.xxx,
+            "kwargs": {} # 定时器参数
+        }]
+        """
+        if self._enabled and self._cron:
+            return [
+                {
+                    "id": "DoubanRank",
+                    "name": "豆瓣榜单订阅服务",
+                    "trigger": CronTrigger.from_crontab(self._cron),
+                    "func": self.__refresh_rss,
+                    "kwargs": {}
+                }
+            ]
+        elif self._enabled:
+            return [
+                {
+                    "id": "DoubanRank",
+                    "name": "豆瓣榜单订阅服务",
+                    "trigger": CronTrigger.from_crontab("0 8 * * *"),
+                    "func": self.__refresh_rss,
+                    "kwargs": {}
+                }
+            ]
+        return []
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
@@ -255,6 +296,7 @@ class DoubanRank(_PluginBase):
                                                 {'title': '热门电影', 'value': 'movie-hot-gaia'},
                                                 {'title': '热门电视剧', 'value': 'tv-hot'},
                                                 {'title': '电影TOP10', 'value': 'movie-top250'},
+                                                {'title': '电影TOP250', 'value': 'movie-top250-full'},
                                             ]
                                         }
                                     }
@@ -345,6 +387,22 @@ class DoubanRank(_PluginBase):
                     'component': 'VCard',
                     'content': [
                         {
+                            "component": "VDialogCloseBtn",
+                            "props": {
+                                'innerClass': 'absolute top-0 right-0',
+                            },
+                            'events': {
+                                'click': {
+                                    'api': 'plugin/DoubanRank/delete_history',
+                                    'method': 'get',
+                                    'params': {
+                                        'key': f"doubanrank: {title} (DB:{doubanid})",
+                                        'apikey': settings.API_TOKEN
+                                    }
+                                }
+                            },
+                        },
+                        {
                             'component': 'div',
                             'props': {
                                 'class': 'd-flex justify-space-start flex-nowrap flex-row',
@@ -370,9 +428,9 @@ class DoubanRank(_PluginBase):
                                     'component': 'div',
                                     'content': [
                                         {
-                                            'component': 'VCardSubtitle',
+                                            'component': 'VCardTitle',
                                             'props': {
-                                                'class': 'pa-2 font-bold break-words whitespace-break-spaces'
+                                                'class': 'ps-1 pe-5 break-words whitespace-break-spaces'
                                             },
                                             'content': [
                                                 {
@@ -432,6 +490,21 @@ class DoubanRank(_PluginBase):
         except Exception as e:
             print(str(e))
 
+    def delete_history(self, key: str, apikey: str):
+        """
+        删除同步历史记录
+        """
+        if apikey != settings.API_TOKEN:
+            return schemas.Response(success=False, message="API密钥错误")
+        # 历史记录
+        historys = self.get_data('history')
+        if not historys:
+            return schemas.Response(success=False, message="未找到历史记录")
+        # 删除指定记录
+        historys = [h for h in historys if h.get("unique") != key]
+        self.save_data('history', historys)
+        return schemas.Response(success=True, message="删除成功")
+
     def __update_config(self):
         """
         列新配置
@@ -479,10 +552,15 @@ class DoubanRank(_PluginBase):
                     if self._event.is_set():
                         logger.info(f"订阅服务停止")
                         return
-
+                    mtype = None
                     title = rss_info.get('title')
                     douban_id = rss_info.get('doubanid')
                     year = rss_info.get('year')
+                    type_str = rss_info.get('type')
+                    if type_str == "movie":
+                        mtype = MediaType.MOVIE
+                    elif type_str:
+                        mtype = MediaType.TV
                     unique_flag = f"doubanrank: {title} (DB:{douban_id})"
                     # 检查是否已处理过
                     if unique_flag in [h.get("unique") for h in history]:
@@ -490,14 +568,25 @@ class DoubanRank(_PluginBase):
                     # 元数据
                     meta = MetaInfo(title)
                     meta.year = year
+                    if mtype:
+                        meta.type = mtype
                     # 识别媒体信息
                     if douban_id:
                         # 识别豆瓣信息
-                        mediainfo = self.chain.recognize_media(meta=meta, doubanid=douban_id)
-                        if not mediainfo:
-                            logger.warn(f'未识别到媒体信息，标题：{title}，豆瓣ID：{douban_id}')
-                            continue
-
+                        if settings.RECOGNIZE_SOURCE == "themoviedb":
+                            tmdbinfo = self.mediachain.get_tmdbinfo_by_doubanid(doubanid=douban_id, mtype=meta.type)
+                            if not tmdbinfo:
+                                logger.warn(f'未能通过豆瓣ID {douban_id} 获取到TMDB信息，标题：{title}，豆瓣ID：{douban_id}')
+                                continue
+                            mediainfo = self.chain.recognize_media(meta=meta, tmdbid=tmdbinfo.get("id"))
+                            if not mediainfo:
+                                logger.warn(f'TMDBID {tmdbinfo.get("id")} 未识别到媒体信息')
+                                continue
+                        else:
+                            mediainfo = self.chain.recognize_media(meta=meta, doubanid=douban_id)
+                            if not mediainfo:
+                                logger.warn(f'豆瓣ID {douban_id} 未识别到媒体信息')
+                                continue
                     else:
                         # 匹配媒体信息
                         mediainfo: MediaInfo = self.chain.recognize_media(meta=meta)

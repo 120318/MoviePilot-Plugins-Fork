@@ -27,7 +27,7 @@ class TorrentTransfer(_PluginBase):
     # 插件图标
     plugin_icon = "seed.png"
     # 插件版本
-    plugin_version = "1.1"
+    plugin_version = "1.4"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -57,8 +57,10 @@ class TorrentTransfer(_PluginBase):
     _includelabels = None
     _nopaths = None
     _deletesource = False
+    _deleteduplicate = False
     _fromtorrentpath = None
     _autostart = False
+    _transferemptylabel = False
     # 退出事件
     _event = Event()
     # 待检查种子清单
@@ -82,9 +84,11 @@ class TorrentTransfer(_PluginBase):
             self._fromdownloader = config.get("fromdownloader")
             self._todownloader = config.get("todownloader")
             self._deletesource = config.get("deletesource")
+            self._deleteduplicate = config.get("deleteduplicate")
             self._fromtorrentpath = config.get("fromtorrentpath")
             self._nopaths = config.get("nopaths")
             self._autostart = config.get("autostart")
+            self._transferemptylabel = config.get("transferemptylabel")
 
         # 停止现有任务
         self.stop_service()
@@ -96,22 +100,20 @@ class TorrentTransfer(_PluginBase):
             # 检查配置
             if self._fromtorrentpath and not Path(self._fromtorrentpath).exists():
                 logger.error(f"源下载器种子文件保存路径不存在：{self._fromtorrentpath}")
-                self.systemmessage.put(f"源下载器种子文件保存路径不存在：{self._fromtorrentpath}")
+                self.systemmessage.put(f"源下载器种子文件保存路径不存在：{self._fromtorrentpath}", title="自动转移做种")
                 return
             if self._fromdownloader == self._todownloader:
                 logger.error(f"源下载器和目的下载器不能相同")
-                self.systemmessage.put(f"源下载器和目的下载器不能相同")
+                self.systemmessage.put(f"源下载器和目的下载器不能相同", title="自动转移做种")
                 return
+
+            # 定时服务
             self._scheduler = BackgroundScheduler(timezone=settings.TZ)
-            if self._cron:
-                logger.info(f"转移做种服务启动，周期：{self._cron}")
-                try:
-                    self._scheduler.add_job(self.transfer,
-                                            CronTrigger.from_crontab(self._cron))
-                except Exception as e:
-                    logger.error(f"转移做种服务启动失败：{str(e)}")
-                    self.systemmessage.put(f"转移做种服务启动失败：{str(e)}")
-                    return
+
+            if self._autostart:
+                # 追加种子校验服务
+                self._scheduler.add_job(self.check_recheck, 'interval', minutes=3)
+
             if self._onlyonce:
                 logger.info(f"转移做种服务启动，立即运行一次")
                 self._scheduler.add_job(self.transfer, 'date',
@@ -131,15 +133,15 @@ class TorrentTransfer(_PluginBase):
                     "fromdownloader": self._fromdownloader,
                     "todownloader": self._todownloader,
                     "deletesource": self._deletesource,
+                    "deleteduplicate": self._deleteduplicate,
                     "fromtorrentpath": self._fromtorrentpath,
                     "nopaths": self._nopaths,
-                    "autostart": self._autostart
+                    "autostart": self._autostart,
+                    "transferemptylabel": self._transferemptylabel
                 })
+
+            # 启动服务
             if self._scheduler.get_jobs():
-                if self._autostart:
-                    # 追加种子校验服务
-                    self._scheduler.add_job(self.check_recheck, 'interval', minutes=3)
-                # 启动服务
                 self._scheduler.print_jobs()
                 self._scheduler.start()
 
@@ -157,6 +159,29 @@ class TorrentTransfer(_PluginBase):
     def get_api(self) -> List[Dict[str, Any]]:
         pass
 
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册插件公共服务
+        [{
+            "id": "服务ID",
+            "name": "服务名称",
+            "trigger": "触发器：cron/interval/date/CronTrigger.from_crontab()",
+            "func": self.xxx,
+            "kwargs": {} # 定时器参数
+        }]
+        """
+        if self.get_state():
+            return [
+                {
+                    "id": "TorrentTransfer",
+                    "name": "转移做种服务",
+                    "trigger": CronTrigger.from_crontab(self._cron),
+                    "func": self.transfer,
+                    "kwargs": {}
+                }
+            ]
+        return []
+
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
         拼装插件配置页面，需要返回两块数据：1、页面配置；2、数据结构
@@ -172,7 +197,7 @@ class TorrentTransfer(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 6
+                                    'md': 4
                                 },
                                 'content': [
                                     {
@@ -188,7 +213,7 @@ class TorrentTransfer(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 6
+                                    'md': 4
                                 },
                                 'content': [
                                     {
@@ -196,6 +221,22 @@ class TorrentTransfer(_PluginBase):
                                         'props': {
                                             'model': 'notify',
                                             'label': '发送通知',
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                    'md': 4
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'transferemptylabel',
+                                            'label': '转移无标签种子',
                                         }
                                     }
                                 ]
@@ -382,7 +423,7 @@ class TorrentTransfer(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 4
+                                    'md': 3
                                 },
                                 'content': [
                                     {
@@ -398,7 +439,7 @@ class TorrentTransfer(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 4
+                                    'md': 3
                                 },
                                 'content': [
                                     {
@@ -414,7 +455,23 @@ class TorrentTransfer(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 4
+                                    'md': 3
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'deleteduplicate',
+                                            'label': '删除重复种子',
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                    'md': 3
                                 },
                                 'content': [
                                     {
@@ -442,9 +499,11 @@ class TorrentTransfer(_PluginBase):
             "fromdownloader": "",
             "todownloader": "",
             "deletesource": False,
+            "deleteduplicate": False,
             "fromtorrentpath": "",
             "nopaths": "",
-            "autostart": True
+            "autostart": True,
+            "transferemptylabel": False
         }
 
     def get_page(self) -> List[dict]:
@@ -479,7 +538,7 @@ class TorrentTransfer(_PluginBase):
                 # 获取种子Hash
                 torrent_hash = self.qb.get_torrent_id_by_tag(tags=tag)
                 if not torrent_hash:
-                    logger.error(f"{downloader} 获取种子Hash失败")
+                    logger.error(f"{downloader} 下载任务添加成功，但获取任务信息失败！")
                     return None
             return torrent_hash
         elif downloader == "transmission":
@@ -541,26 +600,37 @@ class TorrentTransfer(_PluginBase):
 
             # 获取种子标签
             torrent_labels = self.__get_label(torrent, downloader)
-            # 排除含有不转移的标签
-            if torrent_labels and self._nolabels:
-                is_skip = False
-                for label in self._nolabels.split(','):
-                    if label in torrent_labels:
-                        logger.info(f"种子 {hash_str} 含有不转移标签 {label}，跳过 ...")
-                        is_skip = True
-                        break
-                if is_skip:
+            
+            # 种子为无标签,则进行规范化
+            is_torrent_labels_empty = torrent_labels == [''] or torrent_labels == [] or torrent_labels is None
+            if is_torrent_labels_empty:
+                torrent_labels = []
+            
+            #根据设置决定是否转移无标签的种子
+            if is_torrent_labels_empty:
+                if not self._transferemptylabel:
                     continue
-            # 排除不含有转移标签的种子
-            if torrent_labels and self._includelabels:
-                is_skip = False
-                for label in self._includelabels.split(','):
-                    if label not in torrent_labels:
-                        logger.info(f"种子 {hash_str} 不含有转移标签 {label}，跳过 ...")
-                        is_skip = True
-                        break
-                if is_skip:
-                    continue
+            else:
+                # 排除含有不转移的标签
+                if self._nolabels:
+                    is_skip = False
+                    for label in self._nolabels.split(','):
+                        if label in torrent_labels:
+                            logger.info(f"种子 {hash_str} 含有不转移标签 {label}，跳过 ...")
+                            is_skip = True
+                            break
+                    if is_skip:
+                        continue
+                # 排除不含有转移标签的种子
+                if self._includelabels:
+                    is_skip = False
+                    for label in self._includelabels.split(','):
+                        if label not in torrent_labels:
+                            logger.info(f"种子 {hash_str} 不含有转移标签 {label}，跳过 ...")
+                            is_skip = True
+                            break
+                    if is_skip:
+                        continue
 
             # 添加转移数据
             trans_torrents.append({
@@ -580,6 +650,8 @@ class TorrentTransfer(_PluginBase):
             fail = 0
             # 跳过数
             skip = 0
+            # 删除重复数
+            del_dup = 0
 
             for torrent_item in trans_torrents:
                 # 检查种子文件是否存在
@@ -594,9 +666,15 @@ class TorrentTransfer(_PluginBase):
                 todownloader_obj = self.__get_downloader(todownloader)
                 torrent_info, _ = todownloader_obj.get_torrents(ids=[torrent_item.get('hash')])
                 if torrent_info:
-                    logger.info(f"{torrent_item.get('hash')} 已在目的下载器中，跳过 ...")
-                    # 跳过计数
-                    skip += 1
+                    # 删除重复的源种子，不能删除文件！
+                    if self._deleteduplicate:
+                        logger.info(f"删除重复的源下载器任务（不含文件）：{torrent_item.get('hash')} ...")
+                        downloader_obj.delete_torrents(delete_file=False, ids=[torrent_item.get('hash')])
+                        del_dup += 1
+                    else:
+                        logger.info(f"{torrent_item.get('hash')} 已在目的下载器中，跳过 ...")
+                        # 跳过计数
+                        skip += 1
                     continue
 
                 # 转换保存路径
@@ -694,6 +772,7 @@ class TorrentTransfer(_PluginBase):
                                        "to_download": self._todownloader,
                                        "to_download_id": download_id,
                                        "delete_source": self._deletesource,
+                                       "delete_duplicate": self._deleteduplicate,
                                    })
             # 触发校验任务
             if success > 0 and self._autostart:
@@ -704,7 +783,7 @@ class TorrentTransfer(_PluginBase):
                 self.post_message(
                     mtype=NotificationType.SiteMessage,
                     title="【转移做种任务执行完成】",
-                    text=f"总数：{total}，成功：{success}，失败：{fail}，跳过：{skip}"
+                    text=f"总数：{total}，成功：{success}，失败：{fail}，跳过：{skip}，删除重复：{del_dup}"
                 )
         else:
             logger.info(f"没有需要转移的种子")

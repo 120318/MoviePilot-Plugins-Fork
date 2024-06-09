@@ -17,7 +17,7 @@ from app.core.config import settings
 from app.core.event import eventmanager, Event
 from app.log import logger
 from app.plugins import _PluginBase
-from app.schemas import Notification, NotificationType
+from app.schemas import NotificationType
 from app.schemas.types import EventType
 from app.utils.system import SystemUtils
 
@@ -51,7 +51,7 @@ class LinkMonitor(_PluginBase):
     # 插件图标
     plugin_icon = "Linkace_C.png"
     # 插件版本
-    plugin_version = "1.2"
+    plugin_version = "1.6"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -104,8 +104,6 @@ class LinkMonitor(_PluginBase):
         self.stop_service()
 
         if self._enabled or self._onlyonce:
-            # 定时服务管理器
-            self._scheduler = BackgroundScheduler(timezone=settings.TZ)
 
             # 读取目录配置
             monitor_dirs = self._monitor_dirs.split("\n")
@@ -133,7 +131,7 @@ class LinkMonitor(_PluginBase):
                     self._dirconf[mon_path] = target_path
                 else:
                     logger.warn(f"{mon_path} 未配置目的目录，将不会进行硬链接")
-                    self.systemmessage.put(f"{mon_path} 未配置目的目录，将不会进行硬链接！")
+                    self.systemmessage.put(f"{mon_path} 未配置目的目录，将不会进行硬链接！", title="实时硬链接")
                     continue
 
                 # 启用目录监控
@@ -142,7 +140,7 @@ class LinkMonitor(_PluginBase):
                     try:
                         if target_path and target_path.is_relative_to(Path(mon_path)):
                             logger.warn(f"{target_path} 是监控目录 {mon_path} 的子目录，无法监控")
-                            self.systemmessage.put(f"{target_path} 是下载目录 {mon_path} 的子目录，无法监控")
+                            self.systemmessage.put(f"{target_path} 是下载目录 {mon_path} 的子目录，无法监控", title="实时硬链接")
                             continue
                     except Exception as e:
                         logger.debug(str(e))
@@ -172,10 +170,12 @@ class LinkMonitor(_PluginBase):
                                      """)
                         else:
                             logger.error(f"{mon_path} 启动目录监控失败：{err_msg}")
-                        self.systemmessage.put(f"{mon_path} 启动目录监控失败：{err_msg}")
+                        self.systemmessage.put(f"{mon_path} 启动目录监控失败：{err_msg}", title="实时硬链接")
 
             # 运行一次定时服务
             if self._onlyonce:
+                # 定时服务管理器
+                self._scheduler = BackgroundScheduler(timezone=settings.TZ)
                 logger.info("目录监控服务启动，立即运行一次")
                 self._scheduler.add_job(func=self.sync_all, trigger='date',
                                         run_date=datetime.datetime.now(
@@ -186,21 +186,10 @@ class LinkMonitor(_PluginBase):
                 # 保存配置
                 self.__update_config()
 
-            # 全量同步定时
-            if self._enabled and self._cron:
-                try:
-                    self._scheduler.add_job(func=self.sync_all,
-                                            trigger=CronTrigger.from_crontab(self._cron),
-                                            name="实时硬链接")
-                except Exception as err:
-                    logger.error(f"定时任务配置错误：{str(err)}")
-                    # 推送实时消息
-                    self.systemmessage.put(f"执行周期配置错误：{str(err)}")
-
-            # 启动定时服务
-            if self._scheduler.get_jobs():
-                self._scheduler.print_jobs()
-                self._scheduler.start()
+                # 启动定时服务
+                if self._scheduler.get_jobs():
+                    self._scheduler.print_jobs()
+                    self._scheduler.start()
 
     def __update_config(self):
         """
@@ -269,8 +258,12 @@ class LinkMonitor(_PluginBase):
         :param target_path: 目标目录
         :param transfer_type: 转移方式
         """
-        new_file = str(src_path).replace(mon_path, str(target_path))
-        new_path = Path(new_file)
+        # 计算相对路径
+        try:
+            rel_path = src_path.relative_to(Path(mon_path))
+        except ValueError:
+            return False, "文件路径不在监控目录内"
+        new_path = target_path / rel_path
         if new_path.exists():
             return True, "目标路径文件已存在"
         else:
@@ -315,9 +308,9 @@ class LinkMonitor(_PluginBase):
                 # 判断文件大小
                 if self._size and float(self._size) > 0 and file_path.stat().st_size < float(self._size) * 1024:
                     logger.info(f"{event_path} 文件大小小于最小文件大小，复制...")
-                    _transfer_type = "link"
-                else:
                     _transfer_type = "copy"
+                else:
+                    _transfer_type = "link"
 
                 # 查询转移目的目录
                 target: Path = self._dirconf.get(mon_path)
@@ -333,21 +326,21 @@ class LinkMonitor(_PluginBase):
                     # 转移失败
                     logger.warn(f"{file_path.name} 硬链接失败：{errmsg}")
                     if self._notify:
-                        self.chain.post_message(Notification(
+                        self.post_message(
                             mtype=NotificationType.Manual,
                             title=f"{file_path.name} 硬链接失败！",
                             text=f"原因：{errmsg or '未知'}"
-                        ))
+                        )
                     return
 
                 # 转移成功
                 logger.info(f"{file_path.name} 硬链接成功")
                 if self._notify:
-                    self.chain.post_message(Notification(
+                    self.post_message(
                         mtype=NotificationType.Manual,
                         title=f"{file_path.name} 硬链接完成！",
                         text=f"目标目录：{target}"
-                    ))
+                    )
 
         except Exception as e:
             logger.error("目录监控发生错误：%s - %s" % (str(e), traceback.format_exc()))
@@ -380,10 +373,32 @@ class LinkMonitor(_PluginBase):
             "description": "实时硬链接",
         }]
 
-    def sync(self) -> schemas.Response:
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册插件公共服务
+        [{
+            "id": "服务ID",
+            "name": "服务名称",
+            "trigger": "触发器：cron/interval/date/CronTrigger.from_crontab()",
+            "func": self.xxx,
+            "kwargs": {} # 定时器参数
+        }]
+        """
+        if self._enabled and self._cron:
+            return [{
+                "id": "LinkMonitor",
+                "name": "全量硬链接定时服务",
+                "trigger": CronTrigger.from_crontab(self._cron),
+                "func": self.sync_all,
+                "kwargs": {}
+            }]
+
+    def sync(self, apikey: str) -> schemas.Response:
         """
         API调用目录同步
         """
+        if apikey != settings.API_TOKEN:
+            return schemas.Response(success=False, message="API密钥错误")
         self.sync_all()
         return schemas.Response(success=True)
 

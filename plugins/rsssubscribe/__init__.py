@@ -1,5 +1,6 @@
 import datetime
 import re
+import traceback
 from pathlib import Path
 from threading import Lock
 from typing import Optional, Any, List, Dict, Tuple
@@ -8,6 +9,7 @@ import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from app import schemas
 from app.chain.download import DownloadChain
 from app.chain.search import SearchChain
 from app.chain.subscribe import SubscribeChain
@@ -17,6 +19,7 @@ from app.core.metainfo import MetaInfo
 from app.helper.rss import RssHelper
 from app.log import logger
 from app.plugins import _PluginBase
+from app.schemas import ExistMediaInfo
 from app.schemas.types import SystemConfigKey, MediaType
 
 lock = Lock()
@@ -30,7 +33,7 @@ class RssSubscribe(_PluginBase):
     # 插件图标
     plugin_icon = "rss.png"
     # 插件版本
-    plugin_version = "1.0"
+    plugin_version = "1.4"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -89,42 +92,28 @@ class RssSubscribe(_PluginBase):
             self._action = config.get("action")
             self._save_path = config.get("save_path")
 
-        if self._enabled or self._onlyonce:
-
+        if self._onlyonce:
             self._scheduler = BackgroundScheduler(timezone=settings.TZ)
-            if self._cron:
-                try:
-                    self._scheduler.add_job(func=self.check,
-                                            trigger=CronTrigger.from_crontab(self._cron),
-                                            name="RSS订阅")
-                except Exception as err:
-                    logger.error(f"定时任务配置错误：{str(err)}")
-                    # 推送实时消息
-                    self.systemmessage.put(f"执行周期配置错误：{str(err)}")
-            else:
-                self._scheduler.add_job(self.check, "interval", minutes=30, name="RSS订阅")
-
-            if self._onlyonce:
-                logger.info(f"RSS订阅服务启动，立即运行一次")
-                self._scheduler.add_job(func=self.check, trigger='date',
-                                        run_date=datetime.datetime.now(
-                                            tz=pytz.timezone(settings.TZ)) + datetime.timedelta(seconds=3)
-                                        )
-
-            if self._onlyonce or self._clear:
-                # 关闭一次性开关
-                self._onlyonce = False
-                # 记录清理缓存设置
-                self._clearflag = self._clear
-                # 关闭清理缓存开关
-                self._clear = False
-                # 保存设置
-                self.__update_config()
+            logger.info(f"自定义订阅服务启动，立即运行一次")
+            self._scheduler.add_job(func=self.check, trigger='date',
+                                    run_date=datetime.datetime.now(
+                                        tz=pytz.timezone(settings.TZ)) + datetime.timedelta(seconds=3)
+                                    )
 
             # 启动任务
             if self._scheduler.get_jobs():
                 self._scheduler.print_jobs()
                 self._scheduler.start()
+
+        if self._onlyonce or self._clear:
+            # 关闭一次性开关
+            self._onlyonce = False
+            # 记录清理缓存设置
+            self._clearflag = self._clear
+            # 关闭清理缓存开关
+            self._clear = False
+            # 保存设置
+            self.__update_config()
 
     def get_state(self) -> bool:
         return self._enabled
@@ -147,7 +136,43 @@ class RssSubscribe(_PluginBase):
             "summary": "API说明"
         }]
         """
-        pass
+        return [
+            {
+                "path": "/delete_history",
+                "endpoint": self.delete_history,
+                "methods": ["GET"],
+                "summary": "删除自定义订阅历史记录"
+            }
+        ]
+
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册插件公共服务
+        [{
+            "id": "服务ID",
+            "name": "服务名称",
+            "trigger": "触发器：cron/interval/date/CronTrigger.from_crontab()",
+            "func": self.xxx,
+            "kwargs": {} # 定时器参数
+        }]
+        """
+        if self._enabled and self._cron:
+            return [{
+                "id": "RssSubscribe",
+                "name": "自定义订阅服务",
+                "trigger": CronTrigger.from_crontab(self._cron),
+                "func": self.check,
+                "kwargs": {}
+            }]
+        elif self._enabled:
+            return [{
+                "id": "RssSubscribe",
+                "name": "自定义订阅服务",
+                "trigger": "interval",
+                "func": self.check,
+                "kwargs": {"minutes": 30}
+            }]
+        return []
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
@@ -434,6 +459,22 @@ class RssSubscribe(_PluginBase):
                     'component': 'VCard',
                     'content': [
                         {
+                            "component": "VDialogCloseBtn",
+                            "props": {
+                                'innerClass': 'absolute top-0 right-0',
+                            },
+                            'events': {
+                                'click': {
+                                    'api': 'plugin/RssSubscribe/delete_history',
+                                    'method': 'get',
+                                    'params': {
+                                        'key': title,
+                                        'apikey': settings.API_TOKEN
+                                    }
+                                }
+                            },
+                        },
+                        {
                             'component': 'div',
                             'props': {
                                 'class': 'd-flex justify-space-start flex-nowrap flex-row',
@@ -459,9 +500,9 @@ class RssSubscribe(_PluginBase):
                                     'component': 'div',
                                     'content': [
                                         {
-                                            'component': 'VCardSubtitle',
+                                            'component': 'VCardTitle',
                                             'props': {
-                                                'class': 'pa-2 font-bold break-words whitespace-break-spaces'
+                                                'class': 'pa-1 pe-5 break-words whitespace-break-spaces'
                                             },
                                             'text': title
                                         },
@@ -509,6 +550,21 @@ class RssSubscribe(_PluginBase):
                 self._scheduler = None
         except Exception as e:
             logger.error("退出插件失败：%s" % str(e))
+
+    def delete_history(self, key: str, apikey: str):
+        """
+        删除同步历史记录
+        """
+        if apikey != settings.API_TOKEN:
+            return schemas.Response(success=False, message="API密钥错误")
+        # 历史记录
+        historys = self.get_data('history')
+        if not historys:
+            return schemas.Response(success=False, message="未找到历史记录")
+        # 删除指定记录
+        historys = [h for h in historys if h.get("title") != key]
+        self.save_data('history', historys)
+        return schemas.Response(success=True, message="删除成功")
 
     def __update_config(self):
         """
@@ -558,7 +614,7 @@ class RssSubscribe(_PluginBase):
                     description = result.get("description")
                     enclosure = result.get("enclosure")
                     link = result.get("link")
-                    sise = result.get("sise")
+                    size = result.get("size")
                     pubdate: datetime.datetime = result.get("pubdate")
                     # 检查是否处理过
                     if not title or title in [h.get("key") for h in history]:
@@ -587,7 +643,7 @@ class RssSubscribe(_PluginBase):
                         description=description,
                         enclosure=enclosure,
                         page_url=link,
-                        size=sise,
+                        size=size,
                         pubdate=pubdate.strftime("%Y-%m-%d %H:%M:%S") if pubdate else None,
                         site_proxy=self._proxy,
                     )
@@ -601,51 +657,49 @@ class RssSubscribe(_PluginBase):
                         if not result:
                             logger.info(f"{title} {description} 不匹配过滤规则")
                             continue
-                    # 查询缺失的媒体信息
-                    exist_flag, no_exists = self.downloadchain.get_no_exists_info(meta=meta, mediainfo=mediainfo)
-                    if exist_flag:
-                        logger.info(f'{mediainfo.title_year} 媒体库中已存在')
+                    # 媒体库已存在的剧集
+                    exist_info: Optional[ExistMediaInfo] = self.chain.media_exists(mediainfo=mediainfo)
+                    if mediainfo.type == MediaType.TV:
+                        if exist_info:
+                            exist_season = exist_info.seasons
+                            if exist_season:
+                                exist_episodes = exist_season.get(meta.begin_season)
+                                if exist_episodes and set(meta.episode_list).issubset(set(exist_episodes)):
+                                    logger.info(f'{mediainfo.title_year} {meta.season_episode} 己存在')
+                                    continue
+                    elif exist_info:
+                        # 电影已存在
+                        logger.info(f'{mediainfo.title_year} 己存在')
                         continue
+                    # 下载或订阅
+                    if self._action == "download":
+                        # 添加下载
+                        result = self.downloadchain.download_single(
+                            context=Context(
+                                meta_info=meta,
+                                media_info=mediainfo,
+                                torrent_info=torrentinfo,
+                            ),
+                            save_path=self._save_path,
+                            username="RSS订阅"
+                        )
+                        if not result:
+                            logger.error(f'{title} 下载失败')
+                            continue
                     else:
-                        if self._action == "download":
-                            if mediainfo.type == MediaType.TV:
-                                if no_exists:
-                                    exist_info = no_exists.get(mediainfo.tmdb_id)
-                                    season_info = exist_info.get(meta.begin_season or 1)
-                                    if not season_info:
-                                        logger.info(f'{mediainfo.title_year} {meta.season} 己存在')
-                                        continue
-                                    if (season_info.episodes
-                                            and not set(meta.episode_list).issubset(set(season_info.episodes))):
-                                        logger.info(f'{mediainfo.title_year} {meta.season_episode} 己存在')
-                                        continue
-                            # 添加下载
-                            result = self.downloadchain.download_single(
-                                context=Context(
-                                    meta_info=meta,
-                                    media_info=mediainfo,
-                                    torrent_info=torrentinfo,
-                                ),
-                                save_path=self._save_path,
-                                username="RSS订阅"
-                            )
-                            if not result:
-                                logger.error(f'{title} 下载失败')
-                                continue
-                        else:
-                            # 检查是否在订阅中
-                            subflag = self.subscribechain.exists(mediainfo=mediainfo, meta=meta)
-                            if subflag:
-                                logger.info(f'{mediainfo.title_year} {meta.season} 正在订阅中')
-                                continue
-                            # 添加订阅
-                            self.subscribechain.add(title=mediainfo.title,
-                                                    year=mediainfo.year,
-                                                    mtype=mediainfo.type,
-                                                    tmdbid=mediainfo.tmdb_id,
-                                                    season=meta.begin_season,
-                                                    exist_ok=True,
-                                                    username="RSS订阅")
+                        # 检查是否在订阅中
+                        subflag = self.subscribechain.exists(mediainfo=mediainfo, meta=meta)
+                        if subflag:
+                            logger.info(f'{mediainfo.title_year} {meta.season} 正在订阅中')
+                            continue
+                        # 添加订阅
+                        self.subscribechain.add(title=mediainfo.title,
+                                                year=mediainfo.year,
+                                                mtype=mediainfo.type,
+                                                tmdbid=mediainfo.tmdb_id,
+                                                season=meta.begin_season,
+                                                exist_ok=True,
+                                                username="RSS订阅")
                     # 存储历史记录
                     history.append({
                         "title": f"{mediainfo.title} {meta.season}",
@@ -658,7 +712,7 @@ class RssSubscribe(_PluginBase):
                         "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     })
                 except Exception as err:
-                    logger.error(f'刷新RSS数据出错：{str(err)}')
+                    logger.error(f'刷新RSS数据出错：{str(err)} - {traceback.format_exc()}')
             logger.info(f"RSS {url} 刷新完成")
         # 保存历史记录
         self.save_data('history', history)

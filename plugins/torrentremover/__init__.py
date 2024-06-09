@@ -27,7 +27,7 @@ class TorrentRemover(_PluginBase):
     # 插件图标
     plugin_icon = "delete.jpg"
     # 插件版本
-    plugin_version = "1.1"
+    plugin_version = "1.2.2"
     # 插件作者
     plugin_author = "jxxghp"
     # 作者主页
@@ -88,19 +88,10 @@ class TorrentRemover(_PluginBase):
         self.stop_service()
 
         if self.get_state() or self._onlyonce:
-            self._scheduler = BackgroundScheduler(timezone=settings.TZ)
             self.qb = Qbittorrent()
             self.tr = Transmission()
-            if self._cron:
-                try:
-                    self._scheduler.add_job(func=self.delete_torrents,
-                                            trigger=CronTrigger.from_crontab(self._cron),
-                                            name="自动删种服务")
-                    logger.info(f"自动删种服务启动，周期：{self._cron}")
-                except Exception as err:
-                    logger.error(f"自动删种服务启动失败：{str(err)}")
-                    self.systemmessage.put(f"自动删种服务启动失败：{str(err)}")
             if self._onlyonce:
+                self._scheduler = BackgroundScheduler(timezone=settings.TZ)
                 logger.info(f"自动删种服务启动，立即运行一次")
                 self._scheduler.add_job(func=self.delete_torrents, trigger='date',
                                         run_date=datetime.now(
@@ -130,10 +121,10 @@ class TorrentRemover(_PluginBase):
                     "torrentcategorys": self._torrentcategorys
 
                 })
-            if self._scheduler.get_jobs():
-                # 启动服务
-                self._scheduler.print_jobs()
-                self._scheduler.start()
+                if self._scheduler.get_jobs():
+                    # 启动服务
+                    self._scheduler.print_jobs()
+                    self._scheduler.start()
 
     def get_state(self) -> bool:
         return True if self._enabled and self._cron and self._downloaders else False
@@ -144,6 +135,27 @@ class TorrentRemover(_PluginBase):
 
     def get_api(self) -> List[Dict[str, Any]]:
         pass
+
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册插件公共服务
+        [{
+            "id": "服务ID",
+            "name": "服务名称",
+            "trigger": "触发器：cron/interval/date/CronTrigger.from_crontab()",
+            "func": self.xxx,
+            "kwargs": {} # 定时器参数
+        }]
+        """
+        if self.get_state():
+            return [{
+                "id": "TorrentRemover",
+                "name": "自动删种服务",
+                "trigger": CronTrigger.from_crontab(self._cron),
+                "func": self.delete_torrents,
+                "kwargs": {}
+            }]
+        return []
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
@@ -665,8 +677,8 @@ class TorrentRemover(_PluginBase):
         torrent_upload_avs = torrent.uploaded / torrent_seeding_time if torrent_seeding_time else 0
         # 大小 单位：GB
         sizes = self._size.split('-') if self._size else []
-        minsize = sizes[0] * 1024 * 1024 * 1024 if sizes else 0
-        maxsize = sizes[-1] * 1024 * 1024 * 1024 if sizes else 0
+        minsize = float(sizes[0]) * 1024 * 1024 * 1024 if sizes else 0
+        maxsize = float(sizes[-1]) * 1024 * 1024 * 1024 if sizes else 0
         # 分享率
         if self._ratio and torrent.ratio <= float(self._ratio):
             return None
@@ -709,8 +721,8 @@ class TorrentRemover(_PluginBase):
         torrent_upload_avs = torrent_uploaded / torrent_seeding_time if torrent_seeding_time else 0
         # 大小 单位：GB
         sizes = self._size.split('-') if self._size else []
-        minsize = sizes[0] * 1024 * 1024 * 1024 if sizes else 0
-        maxsize = sizes[-1] * 1024 * 1024 * 1024 if sizes else 0
+        minsize = float(sizes[0]) * 1024 * 1024 * 1024 if sizes else 0
+        maxsize = float(sizes[-1]) * 1024 * 1024 * 1024 if sizes else 0
         # 分享率
         if self._ratio and torrent.ratio <= float(self._ratio):
             return None
@@ -755,7 +767,7 @@ class TorrentRemover(_PluginBase):
         else:
             tags = []
         if self._mponly:
-            tags.extend(settings.TORRENT_TAG)
+            tags.append(settings.TORRENT_TAG)
         # 查询种子
         torrents, error_flag = downloader_obj.get_torrents(tags=tags or None)
         if error_flag:

@@ -43,7 +43,7 @@ class SiteStatistic(_PluginBase):
     # 插件图标
     plugin_icon = "statistic.png"
     # 插件版本
-    plugin_version = "1.5"
+    plugin_version = "3.6"
     # 插件作者
     plugin_author = "lightolly"
     # 作者主页
@@ -70,8 +70,10 @@ class SiteStatistic(_PluginBase):
     _cron: str = ""
     _notify: bool = False
     _queue_cnt: int = 5
+    _remove_failed: bool = False
     _statistic_type: str = None
     _statistic_sites: list = []
+    _dashboard_type: str = "today"
 
     def init_plugin(self, config: dict = None):
         self.sites = SitesHelper()
@@ -87,8 +89,10 @@ class SiteStatistic(_PluginBase):
             self._notify = config.get("notify")
             self._sitemsg = config.get("sitemsg")
             self._queue_cnt = config.get("queue_cnt")
+            self._remove_failed = config.get("remove_failed")
             self._statistic_type = config.get("statistic_type") or "all"
             self._statistic_sites = config.get("statistic_sites") or []
+            self._dashboard_type = config.get("dashboard_type") or "today"
 
             # 过滤掉已删除的站点
             all_sites = [site.id for site in self.siteoper.list_order_by_pri()] + [site.get("id") for site in
@@ -101,9 +105,6 @@ class SiteStatistic(_PluginBase):
             self._site_schema = ModuleHelper.load('app.plugins.sitestatistic.siteuserinfo',
                                                   filter_func=lambda _, obj: hasattr(obj, 'schema'))
 
-            # 定时服务
-            self._scheduler = BackgroundScheduler(timezone=settings.TZ)
-
             self._site_schema.sort(key=lambda x: x.order)
             # 站点上一次更新时间
             self._last_update_time = None
@@ -112,6 +113,8 @@ class SiteStatistic(_PluginBase):
 
             # 立即运行一次
             if self._onlyonce:
+                # 定时服务
+                self._scheduler = BackgroundScheduler(timezone=settings.TZ)
                 logger.info(f"站点数据统计服务启动，立即运行一次")
                 self._scheduler.add_job(self.refresh_all_site_data, 'date',
                                         run_date=datetime.now(
@@ -123,31 +126,10 @@ class SiteStatistic(_PluginBase):
                 # 保存配置
                 self.__update_config()
 
-            # 周期运行
-            if self._enabled and self._cron:
-                try:
-                    self._scheduler.add_job(func=self.refresh_all_site_data,
-                                            trigger=CronTrigger.from_crontab(self._cron),
-                                            name="站点数据统计")
-                except Exception as err:
-                    logger.error(f"定时任务配置错误：{str(err)}")
-                    # 推送实时消息
-                    self.systemmessage.put(f"执行周期配置错误：{str(err)}")
-            else:
-                triggers = TimerUtils.random_scheduler(num_executions=1,
-                                                       begin_hour=0,
-                                                       end_hour=1,
-                                                       min_interval=1,
-                                                       max_interval=60)
-                for trigger in triggers:
-                    self._scheduler.add_job(self.refresh_all_site_data, "cron",
-                                            hour=trigger.hour, minute=trigger.minute,
-                                            name="站点数据统计")
-
-            # 启动任务
-            if self._scheduler.get_jobs():
-                self._scheduler.print_jobs()
-                self._scheduler.start()
+                # 启动任务
+                if self._scheduler.get_jobs():
+                    self._scheduler.print_jobs()
+                    self._scheduler.start()
 
     def get_state(self) -> bool:
         return self._enabled
@@ -185,6 +167,46 @@ class SiteStatistic(_PluginBase):
             "summary": "刷新站点数据",
             "description": "刷新对应域名的站点数据",
         }]
+
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册插件公共服务
+        [{
+            "id": "服务ID",
+            "name": "服务名称",
+            "trigger": "触发器：cron/interval/date/CronTrigger.from_crontab()",
+            "func": self.xxx,
+            "kwargs": {} # 定时器参数
+        }]
+        """
+        if self._enabled and self._cron:
+            return [{
+                "id": "SiteStatistic",
+                "name": "站点数据统计服务",
+                "trigger": CronTrigger.from_crontab(self._cron),
+                "func": self.refresh_all_site_data,
+                "kwargs": {}
+            }]
+        elif self._enabled:
+            triggers = TimerUtils.random_scheduler(num_executions=1,
+                                                   begin_hour=0,
+                                                   end_hour=1,
+                                                   min_interval=1,
+                                                   max_interval=60)
+            ret_jobs = []
+            for trigger in triggers:
+                ret_jobs.append({
+                    "id": f"SiteStatistic|{trigger.hour}:{trigger.minute}",
+                    "name": "站点数据统计服务",
+                    "trigger": "cron",
+                    "func": self.refresh_all_site_data,
+                    "kwargs": {
+                        "hour": trigger.hour,
+                        "minute": trigger.minute
+                    }
+                })
+            return ret_jobs
+        return []
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
@@ -262,7 +284,7 @@ class SiteStatistic(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 4
+                                    'md': 3
                                 },
                                 'content': [
                                     {
@@ -279,7 +301,7 @@ class SiteStatistic(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 4
+                                    'md': 3
                                 },
                                 'content': [
                                     {
@@ -295,7 +317,7 @@ class SiteStatistic(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 4
+                                    'md': 3
                                 },
                                 'content': [
                                     {
@@ -306,6 +328,27 @@ class SiteStatistic(_PluginBase):
                                             'items': [
                                                 {'title': '全量', 'value': 'all'},
                                                 {'title': '增量', 'value': 'add'}
+                                            ]
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                    'md': 3
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VSelect',
+                                        'props': {
+                                            'model': 'dashboard_type',
+                                            'label': '仪表板组件',
+                                            'items': [
+                                                {'title': '今日数据', 'value': 'today'},
+                                                {'title': '汇总数据', 'value': 'total'},
+                                                {'title': '所有数据', 'value': 'all'}
                                             ]
                                         }
                                     }
@@ -351,7 +394,23 @@ class SiteStatistic(_PluginBase):
                                         }
                                     }
                                 ]
-                            }
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                    'md': 4
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'remove_failed',
+                                            'label': '移除失效站点',
+                                        }
+                                    }
+                                ]
+                            },
                         ]
                     }
                 ]
@@ -363,39 +422,16 @@ class SiteStatistic(_PluginBase):
             "sitemsg": True,
             "cron": "5 1 * * *",
             "queue_cnt": 5,
+            "remove_failed": False,
             "statistic_type": "all",
-            "statistic_sites": []
+            "statistic_sites": [],
+            "dashboard_type": 'today'
         }
 
-    def get_page(self) -> List[dict]:
+    def __get_data(self) -> Tuple[str, dict, dict]:
         """
-        拼装插件详情页面，需要返回页面配置，同时附带数据
+        获取今天的日期、今天的站点数据、昨天的站点数据
         """
-
-        def __gb(value: int) -> float:
-            """
-            转换为GB，保留1位小数
-            """
-            if not value:
-                return 0
-            return round(value / 1024 / 1024 / 1024, 1)
-
-        def __sub_dict(d1: dict, d2: dict) -> dict:
-            """
-            计算两个字典相同Key值的差值（如果值为数字），返回新字典
-            """
-            if not d1:
-                return {}
-            if not d2:
-                return d1
-            d = {k: d1.get(k) - d2.get(k) for k in d1
-                 if k in d2 and isinstance(d1.get(k), int) and isinstance(d2.get(k), int)}
-            # 把小于0的数据变成0
-            for k, v in d.items():
-                if isinstance(v, int) and v < 0:
-                    d[k] = 0
-            return d
-
         # 最近一天的签到数据
         stattistic_data: Dict[str, Dict[str, Any]] = {}
         # 昨天数据
@@ -403,15 +439,7 @@ class SiteStatistic(_PluginBase):
         # 获取最近所有数据
         data_list: List[PluginData] = self.get_data(key=None)
         if not data_list:
-            return [
-                {
-                    'component': 'div',
-                    'text': '暂无数据',
-                    'props': {
-                        'class': 'text-center',
-                    }
-                }
-            ]
+            return "", {}, {}
         # 取key符合日期格式的数据
         data_list = [data for data in data_list if re.match(r"\d{4}-\d{2}-\d{2}", data.key)]
         # 按日期倒序排序
@@ -429,18 +457,500 @@ class SiteStatistic(_PluginBase):
         stattistic_data = dict(sorted(stattistic_data.items(),
                                       key=lambda item: item[1].get('upload') or 0,
                                       reverse=True))
-        # 总上传量
-        total_upload = sum([data.get("upload")
-                            for data in stattistic_data.values() if data.get("upload")])
-        # 总下载量
-        total_download = sum([data.get("download")
-                              for data in stattistic_data.values() if data.get("download")])
-        # 总做种数
-        total_seed = sum([data.get("seeding")
-                          for data in stattistic_data.values() if data.get("seeding")])
-        # 总做种体积
-        total_seed_size = sum([data.get("seeding_size")
-                               for data in stattistic_data.values() if data.get("seeding_size")])
+        return today, stattistic_data, yesterday_sites_data
+
+    @staticmethod
+    def __get_total_elements(today: str, stattistic_data: dict, yesterday_sites_data: dict,
+                             dashboard: str = "today") -> List[dict]:
+        """
+        获取统计元素
+        """
+
+        def __gb(value: int) -> float:
+            """
+            转换为GB，保留1位小数
+            """
+            if not value:
+                return 0
+            return round(float(value) / 1024 / 1024 / 1024, 1)
+
+        def __sub_dict(d1: dict, d2: dict) -> dict:
+            """
+            计算两个字典相同Key值的差值（如果值为数字），返回新字典
+            """
+            if not d1:
+                return {}
+            if not d2:
+                return d1
+            d = {k: int(d1.get(k)) - int(d2.get(k)) for k in d1
+                 if k in d2 and str(d1.get(k)).isdigit() and str(d2.get(k)).isdigit()}
+            # 把小于0的数据变成0
+            for k, v in d.items():
+                if str(v).isdigit() and int(v) < 0:
+                    d[k] = 0
+            return d
+
+        if dashboard in ['total', 'all']:
+            # 总上传量
+            total_upload = sum([int(data.get("upload"))
+                                for data in stattistic_data.values() if data.get("upload")])
+            # 总下载量
+            total_download = sum([int(data.get("download"))
+                                  for data in stattistic_data.values() if data.get("download")])
+            # 总做种数
+            total_seed = sum([int(data.get("seeding"))
+                              for data in stattistic_data.values() if data.get("seeding")])
+            # 总做种体积
+            total_seed_size = sum([int(data.get("seeding_size"))
+                                   for data in stattistic_data.values() if data.get("seeding_size")])
+
+            total_elements = [
+                # 总上传量
+                {
+                    'component': 'VCol',
+                    'props': {
+                        'cols': 6,
+                        'md': 3
+                    },
+                    'content': [
+                        {
+                            'component': 'VCard',
+                            'props': {
+                                'variant': 'tonal',
+                            },
+                            'content': [
+                                {
+                                    'component': 'VCardText',
+                                    'props': {
+                                        'class': 'd-flex align-center',
+                                    },
+                                    'content': [
+                                        {
+                                            'component': 'VAvatar',
+                                            'props': {
+                                                'rounded': True,
+                                                'variant': 'text',
+                                                'class': 'me-3'
+                                            },
+                                            'content': [
+                                                {
+                                                    'component': 'VImg',
+                                                    'props': {
+                                                        'src': '/plugin_icon/upload.png'
+                                                    }
+                                                }
+                                            ]
+                                        },
+                                        {
+                                            'component': 'div',
+                                            'content': [
+                                                {
+                                                    'component': 'span',
+                                                    'props': {
+                                                        'class': 'text-caption'
+                                                    },
+                                                    'text': '总上传量'
+                                                },
+                                                {
+                                                    'component': 'div',
+                                                    'props': {
+                                                        'class': 'd-flex align-center flex-wrap'
+                                                    },
+                                                    'content': [
+                                                        {
+                                                            'component': 'span',
+                                                            'props': {
+                                                                'class': 'text-h6'
+                                                            },
+                                                            'text': StringUtils.str_filesize(total_upload)
+                                                        }
+                                                    ]
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                    ]
+                },
+                # 总下载量
+                {
+                    'component': 'VCol',
+                    'props': {
+                        'cols': 6,
+                        'md': 3,
+                    },
+                    'content': [
+                        {
+                            'component': 'VCard',
+                            'props': {
+                                'variant': 'tonal',
+                            },
+                            'content': [
+                                {
+                                    'component': 'VCardText',
+                                    'props': {
+                                        'class': 'd-flex align-center',
+                                    },
+                                    'content': [
+                                        {
+                                            'component': 'VAvatar',
+                                            'props': {
+                                                'rounded': True,
+                                                'variant': 'text',
+                                                'class': 'me-3'
+                                            },
+                                            'content': [
+                                                {
+                                                    'component': 'VImg',
+                                                    'props': {
+                                                        'src': '/plugin_icon/download.png'
+                                                    }
+                                                }
+                                            ]
+                                        },
+                                        {
+                                            'component': 'div',
+                                            'content': [
+                                                {
+                                                    'component': 'span',
+                                                    'props': {
+                                                        'class': 'text-caption'
+                                                    },
+                                                    'text': '总下载量'
+                                                },
+                                                {
+                                                    'component': 'div',
+                                                    'props': {
+                                                        'class': 'd-flex align-center flex-wrap'
+                                                    },
+                                                    'content': [
+                                                        {
+                                                            'component': 'span',
+                                                            'props': {
+                                                                'class': 'text-h6'
+                                                            },
+                                                            'text': StringUtils.str_filesize(total_download)
+                                                        }
+                                                    ]
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                    ]
+                },
+                # 总做种数
+                {
+                    'component': 'VCol',
+                    'props': {
+                        'cols': 6,
+                        'md': 3
+                    },
+                    'content': [
+                        {
+                            'component': 'VCard',
+                            'props': {
+                                'variant': 'tonal',
+                            },
+                            'content': [
+                                {
+                                    'component': 'VCardText',
+                                    'props': {
+                                        'class': 'd-flex align-center',
+                                    },
+                                    'content': [
+                                        {
+                                            'component': 'VAvatar',
+                                            'props': {
+                                                'rounded': True,
+                                                'variant': 'text',
+                                                'class': 'me-3'
+                                            },
+                                            'content': [
+                                                {
+                                                    'component': 'VImg',
+                                                    'props': {
+                                                        'src': '/plugin_icon/seed.png'
+                                                    }
+                                                }
+                                            ]
+                                        },
+                                        {
+                                            'component': 'div',
+                                            'content': [
+                                                {
+                                                    'component': 'span',
+                                                    'props': {
+                                                        'class': 'text-caption'
+                                                    },
+                                                    'text': '总做种数'
+                                                },
+                                                {
+                                                    'component': 'div',
+                                                    'props': {
+                                                        'class': 'd-flex align-center flex-wrap'
+                                                    },
+                                                    'content': [
+                                                        {
+                                                            'component': 'span',
+                                                            'props': {
+                                                                'class': 'text-h6'
+                                                            },
+                                                            'text': f'{"{:,}".format(total_seed)}'
+                                                        }
+                                                    ]
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                    ]
+                },
+                # 总做种体积
+                {
+                    'component': 'VCol',
+                    'props': {
+                        'cols': 6,
+                        'md': 3
+                    },
+                    'content': [
+                        {
+                            'component': 'VCard',
+                            'props': {
+                                'variant': 'tonal',
+                            },
+                            'content': [
+                                {
+                                    'component': 'VCardText',
+                                    'props': {
+                                        'class': 'd-flex align-center',
+                                    },
+                                    'content': [
+                                        {
+                                            'component': 'VAvatar',
+                                            'props': {
+                                                'rounded': True,
+                                                'variant': 'text',
+                                                'class': 'me-3'
+                                            },
+                                            'content': [
+                                                {
+                                                    'component': 'VImg',
+                                                    'props': {
+                                                        'src': '/plugin_icon/database.png'
+                                                    }
+                                                }
+                                            ]
+                                        },
+                                        {
+                                            'component': 'div',
+                                            'content': [
+                                                {
+                                                    'component': 'span',
+                                                    'props': {
+                                                        'class': 'text-caption'
+                                                    },
+                                                    'text': '总做种体积'
+                                                },
+                                                {
+                                                    'component': 'div',
+                                                    'props': {
+                                                        'class': 'd-flex align-center flex-wrap'
+                                                    },
+                                                    'content': [
+                                                        {
+                                                            'component': 'span',
+                                                            'props': {
+                                                                'class': 'text-h6'
+                                                            },
+                                                            'text': StringUtils.str_filesize(total_seed_size)
+                                                        }
+                                                    ]
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        else:
+            total_elements = []
+
+        if dashboard in ["today", "all"]:
+            # 计算增量数据集
+            inc_data = {}
+            for site, data in stattistic_data.items():
+                inc = __sub_dict(data, yesterday_sites_data.get(site))
+                if inc:
+                    inc_data[site] = inc
+            # 今日上传
+            uploads = {k: v for k, v in inc_data.items() if v.get("upload")}
+            # 今日上传站点
+            upload_sites = [site for site in uploads.keys()]
+            # 今日上传数据
+            upload_datas = [__gb(data.get("upload")) for data in uploads.values()]
+            # 今日上传总量
+            today_upload = round(sum(upload_datas), 2)
+            # 今日下载
+            downloads = {k: v for k, v in inc_data.items() if v.get("download")}
+            # 今日下载站点
+            download_sites = [site for site in downloads.keys()]
+            # 今日下载数据
+            download_datas = [__gb(data.get("download")) for data in downloads.values()]
+            # 今日下载总量
+            today_download = round(sum(download_datas), 2)
+            # 今日上传下载元素
+            today_elements = [
+                # 上传量图表
+                {
+                    'component': 'VCol',
+                    'props': {
+                        'cols': 12,
+                        'md': 6
+                    },
+                    'content': [
+                        {
+                            'component': 'VApexChart',
+                            'props': {
+                                'height': 300,
+                                'options': {
+                                    'chart': {
+                                        'type': 'pie',
+                                    },
+                                    'labels': upload_sites,
+                                    'title': {
+                                        'text': f'今日上传（{today}）共 {today_upload} GB'
+                                    },
+                                    'legend': {
+                                        'show': True
+                                    },
+                                    'plotOptions': {
+                                        'pie': {
+                                            'expandOnClick': False
+                                        }
+                                    },
+                                    'noData': {
+                                        'text': '暂无数据'
+                                    }
+                                },
+                                'series': upload_datas
+                            }
+                        }
+                    ]
+                },
+                # 下载量图表
+                {
+                    'component': 'VCol',
+                    'props': {
+                        'cols': 12,
+                        'md': 6
+                    },
+                    'content': [
+                        {
+                            'component': 'VApexChart',
+                            'props': {
+                                'height': 300,
+                                'options': {
+                                    'chart': {
+                                        'type': 'pie',
+                                    },
+                                    'labels': download_sites,
+                                    'title': {
+                                        'text': f'今日下载（{today}）共 {today_download} GB'
+                                    },
+                                    'legend': {
+                                        'show': True
+                                    },
+                                    'plotOptions': {
+                                        'pie': {
+                                            'expandOnClick': False
+                                        }
+                                    },
+                                    'noData': {
+                                        'text': '暂无数据'
+                                    }
+                                },
+                                'series': download_datas
+                            }
+                        }
+                    ]
+                }
+            ]
+        else:
+            today_elements = []
+        # 合并返回
+        return total_elements + today_elements
+
+    def get_dashboard(self) -> Optional[Tuple[Dict[str, Any], Dict[str, Any], List[dict]]]:
+        """
+        获取插件仪表盘页面，需要返回：1、仪表板col配置字典；2、仪表板页面元素配置json（含数据）；3、全局配置（自动刷新等）
+        1、col配置参考：
+        {
+            "cols": 12, "md": 6
+        }
+        2、页面配置使用Vuetify组件拼装，参考：https://vuetifyjs.com/
+        3、全局配置参考：
+        {
+            "refresh": 10 // 自动刷新时间，单位秒
+        }
+        """
+        # 列配置
+        cols = {
+            "cols": 12
+        }
+        # 全局配置
+        attrs = {}
+        # 获取数据
+        today, stattistic_data, yesterday_sites_data = self.__get_data()
+        # 汇总
+        # 站点统计
+        elements = [
+            {
+                'component': 'VRow',
+                'content': self.__get_total_elements(
+                    today=today,
+                    stattistic_data=stattistic_data,
+                    yesterday_sites_data=yesterday_sites_data,
+                    dashboard=self._dashboard_type
+                )
+            }
+        ]
+        return cols, attrs, elements
+
+    def get_page(self) -> List[dict]:
+        """
+        拼装插件详情页面，需要返回页面配置，同时附带数据
+        """
+
+        # 获取数据
+        today, stattistic_data, yesterday_sites_data = self.__get_data()
+        if not stattistic_data:
+            return [
+                {
+                    'component': 'div',
+                    'text': '暂无数据',
+                    'props': {
+                        'class': 'text-center',
+                    }
+                }
+            ]
+
+        # 站点统计
+        site_totals = self.__get_total_elements(
+            today=today,
+            stattistic_data=stattistic_data,
+            yesterday_sites_data=yesterday_sites_data,
+            dashboard='all'
+        )
 
         # 站点数据明细
         site_trs = [
@@ -499,384 +1009,11 @@ class SiteStatistic(_PluginBase):
             } for site, data in stattistic_data.items() if not data.get("err_msg")
         ]
 
-        # 计算增量数据集
-        inc_data = {}
-        for site, data in stattistic_data.items():
-            inc = __sub_dict(data, yesterday_sites_data.get(site))
-            if inc:
-                inc_data[site] = inc
-        # 今日上传
-        uploads = {k: v for k, v in inc_data.items() if v.get("upload")}
-        # 今日上传站点
-        upload_sites = [site for site in uploads.keys()]
-        # 今日上传数据
-        upload_datas = [__gb(data.get("upload")) for data in uploads.values()]
-        # 今日下载
-        downloads = {k: v for k, v in inc_data.items() if v.get("download")}
-        # 今日下载站点
-        download_sites = [site for site in downloads.keys()]
-        # 今日下载数据
-        download_datas = [__gb(data.get("download")) for data in downloads.values()]
-
         # 拼装页面
         return [
             {
                 'component': 'VRow',
-                'content': [
-                    # 总上传量
-                    {
-                        'component': 'VCol',
-                        'props': {
-                            'cols': 12,
-                            'md': 3,
-                            'sm': 6
-                        },
-                        'content': [
-                            {
-                                'component': 'VCard',
-                                'props': {
-                                    'variant': 'tonal',
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VCardText',
-                                        'props': {
-                                            'class': 'd-flex align-center',
-                                        },
-                                        'content': [
-                                            {
-                                                'component': 'VAvatar',
-                                                'props': {
-                                                    'rounded': True,
-                                                    'variant': 'text',
-                                                    'class': 'me-3'
-                                                },
-                                                'content': [
-                                                    {
-                                                        'component': 'VImg',
-                                                        'props': {
-                                                            'src': '/plugin_icon/upload.png'
-                                                        }
-                                                    }
-                                                ]
-                                            },
-                                            {
-                                                'component': 'div',
-                                                'content': [
-                                                    {
-                                                        'component': 'span',
-                                                        'props': {
-                                                            'class': 'text-caption'
-                                                        },
-                                                        'text': '总上传量'
-                                                    },
-                                                    {
-                                                        'component': 'div',
-                                                        'props': {
-                                                            'class': 'd-flex align-center flex-wrap'
-                                                        },
-                                                        'content': [
-                                                            {
-                                                                'component': 'span',
-                                                                'props': {
-                                                                    'class': 'text-h6'
-                                                                },
-                                                                'text': StringUtils.str_filesize(total_upload)
-                                                            }
-                                                        ]
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                ]
-                            },
-                        ]
-                    },
-                    # 总下载量
-                    {
-                        'component': 'VCol',
-                        'props': {
-                            'cols': 12,
-                            'md': 3,
-                            'sm': 6
-                        },
-                        'content': [
-                            {
-                                'component': 'VCard',
-                                'props': {
-                                    'variant': 'tonal',
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VCardText',
-                                        'props': {
-                                            'class': 'd-flex align-center',
-                                        },
-                                        'content': [
-                                            {
-                                                'component': 'VAvatar',
-                                                'props': {
-                                                    'rounded': True,
-                                                    'variant': 'text',
-                                                    'class': 'me-3'
-                                                },
-                                                'content': [
-                                                    {
-                                                        'component': 'VImg',
-                                                        'props': {
-                                                            'src': '/plugin_icon/download.png'
-                                                        }
-                                                    }
-                                                ]
-                                            },
-                                            {
-                                                'component': 'div',
-                                                'content': [
-                                                    {
-                                                        'component': 'span',
-                                                        'props': {
-                                                            'class': 'text-caption'
-                                                        },
-                                                        'text': '总下载量'
-                                                    },
-                                                    {
-                                                        'component': 'div',
-                                                        'props': {
-                                                            'class': 'd-flex align-center flex-wrap'
-                                                        },
-                                                        'content': [
-                                                            {
-                                                                'component': 'span',
-                                                                'props': {
-                                                                    'class': 'text-h6'
-                                                                },
-                                                                'text': StringUtils.str_filesize(total_download)
-                                                            }
-                                                        ]
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                ]
-                            },
-                        ]
-                    },
-                    # 总做种数
-                    {
-                        'component': 'VCol',
-                        'props': {
-                            'cols': 12,
-                            'md': 3,
-                            'sm': 6
-                        },
-                        'content': [
-                            {
-                                'component': 'VCard',
-                                'props': {
-                                    'variant': 'tonal',
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VCardText',
-                                        'props': {
-                                            'class': 'd-flex align-center',
-                                        },
-                                        'content': [
-                                            {
-                                                'component': 'VAvatar',
-                                                'props': {
-                                                    'rounded': True,
-                                                    'variant': 'text',
-                                                    'class': 'me-3'
-                                                },
-                                                'content': [
-                                                    {
-                                                        'component': 'VImg',
-                                                        'props': {
-                                                            'src': '/plugin_icon/seed.png'
-                                                        }
-                                                    }
-                                                ]
-                                            },
-                                            {
-                                                'component': 'div',
-                                                'content': [
-                                                    {
-                                                        'component': 'span',
-                                                        'props': {
-                                                            'class': 'text-caption'
-                                                        },
-                                                        'text': '总做种数'
-                                                    },
-                                                    {
-                                                        'component': 'div',
-                                                        'props': {
-                                                            'class': 'd-flex align-center flex-wrap'
-                                                        },
-                                                        'content': [
-                                                            {
-                                                                'component': 'span',
-                                                                'props': {
-                                                                    'class': 'text-h6'
-                                                                },
-                                                                'text': f'{"{:,}".format(total_seed)}'
-                                                            }
-                                                        ]
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                ]
-                            },
-                        ]
-                    },
-                    # 总做种体积
-                    {
-                        'component': 'VCol',
-                        'props': {
-                            'cols': 12,
-                            'md': 3,
-                            'sm': 6
-                        },
-                        'content': [
-                            {
-                                'component': 'VCard',
-                                'props': {
-                                    'variant': 'tonal',
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VCardText',
-                                        'props': {
-                                            'class': 'd-flex align-center',
-                                        },
-                                        'content': [
-                                            {
-                                                'component': 'VAvatar',
-                                                'props': {
-                                                    'rounded': True,
-                                                    'variant': 'text',
-                                                    'class': 'me-3'
-                                                },
-                                                'content': [
-                                                    {
-                                                        'component': 'VImg',
-                                                        'props': {
-                                                            'src': '/plugin_icon/database.png'
-                                                        }
-                                                    }
-                                                ]
-                                            },
-                                            {
-                                                'component': 'div',
-                                                'content': [
-                                                    {
-                                                        'component': 'span',
-                                                        'props': {
-                                                            'class': 'text-caption'
-                                                        },
-                                                        'text': '总做种体积'
-                                                    },
-                                                    {
-                                                        'component': 'div',
-                                                        'props': {
-                                                            'class': 'd-flex align-center flex-wrap'
-                                                        },
-                                                        'content': [
-                                                            {
-                                                                'component': 'span',
-                                                                'props': {
-                                                                    'class': 'text-h6'
-                                                                },
-                                                                'text': StringUtils.str_filesize(total_seed_size)
-                                                            }
-                                                        ]
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    # 上传量图表
-                    {
-                        'component': 'VCol',
-                        'props': {
-                            'cols': 12,
-                            'md': 6
-                        },
-                        'content': [
-                            {
-                                'component': 'VApexChart',
-                                'props': {
-                                    'height': 300,
-                                    'options': {
-                                        'chart': {
-                                            'type': 'pie',
-                                        },
-                                        'labels': upload_sites,
-                                        'title': {
-                                            'text': f'今日上传（{today}）'
-                                        },
-                                        'legend': {
-                                            'show': True
-                                        },
-                                        'plotOptions': {
-                                            'pie': {
-                                                'expandOnClick': False
-                                            }
-                                        },
-                                        'noData': {
-                                            'text': '暂无数据'
-                                        }
-                                    },
-                                    'series': upload_datas
-                                }
-                            }
-                        ]
-                    },
-                    # 下载量图表
-                    {
-                        'component': 'VCol',
-                        'props': {
-                            'cols': 12,
-                            'md': 6
-                        },
-                        'content': [
-                            {
-                                'component': 'VApexChart',
-                                'props': {
-                                    'height': 300,
-                                    'options': {
-                                        'chart': {
-                                            'type': 'pie',
-                                        },
-                                        'labels': download_sites,
-                                        'title': {
-                                            'text': f'今日下载（{today}）'
-                                        },
-                                        'legend': {
-                                            'show': True
-                                        },
-                                        'plotOptions': {
-                                            'pie': {
-                                                'expandOnClick': False
-                                            }
-                                        },
-                                        'noData': {
-                                            'text': '暂无数据'
-                                        }
-                                    },
-                                    'series': download_datas
-                                }
-                            }
-                        ]
-                    },
+                'content': site_totals + [
                     # 各站点数据明细
                     {
                         'component': 'VCol',
@@ -996,10 +1133,12 @@ class SiteStatistic(_PluginBase):
         """
         构建站点信息
         """
-        site_cookie = site_info.get("cookie")
-        if not site_cookie:
-            return None
         site_name = site_info.get("name")
+        site_cookie = site_info.get("cookie")
+        apikey = site_info.get("apikey")
+        token = site_info.get("token")
+        if not site_cookie and not apikey and not token:
+            return None
         url = site_info.get("url")
         proxy = site_info.get("proxy")
         ua = site_info.get("ua")
@@ -1008,8 +1147,7 @@ class SiteStatistic(_PluginBase):
             proxies = settings.PROXY if proxy else None
             proxy_server = settings.PROXY_SERVER if proxy else None
             render = site_info.get("render")
-
-            logger.debug(f"站点 {site_name} url={url} site_cookie={site_cookie} ua={ua}")
+            logger.debug(f"站点 {site_name} url={url}，site_cookie={site_cookie}，ua={ua}，api_key={apikey}，token={token}，proxy={proxy}")
             if render:
                 # 演染模式
                 html_text = PlaywrightHelper().get_page_source(url=url,
@@ -1052,8 +1190,11 @@ class SiteStatistic(_PluginBase):
                             html_text = res.text
                             if not html_text:
                                 return None
-                        else:
+                        elif res is not None:
                             logger.error("站点 %s 被反爬限制：%s, 状态码：%s" % (site_name, url, res.status_code))
+                            return None
+                        else:
+                            logger.error("站点 %s 无法访问：%s" % (site_name, url))
                             return None
 
                     # 兼容假首页情况，假首页通常没有 <link rel="search" 属性
@@ -1083,13 +1224,24 @@ class SiteStatistic(_PluginBase):
                 if not site_schema:
                     logger.error("站点 %s 无法识别站点类型" % site_name)
                     return None
-                return site_schema(site_name, url, site_cookie, html_text, session=session, ua=ua, proxy=proxy)
+                return site_schema(
+                    site_name=site_name,
+                    url=url,
+                    site_cookie=site_cookie,
+                    apikey=apikey,
+                    token=token,
+                    index_html=html_text,
+                    session=session,
+                    ua=ua,
+                    proxy=proxy)
             return None
 
-    def refresh_by_domain(self, domain: str) -> schemas.Response:
+    def refresh_by_domain(self, domain: str, apikey: str) -> schemas.Response:
         """
         刷新一个站点数据，可由API调用
         """
+        if apikey != settings.API_TOKEN:
+            return schemas.Response(success=False, message="API密钥错误")
         site_info = self.sites.get_indexer(domain)
         if site_info:
             site_data = self.__refresh_site_data(site_info)
@@ -1157,13 +1309,16 @@ class SiteStatistic(_PluginBase):
                             "bonus": site_user_info.bonus,
                             "url": site_url,
                             "err_msg": site_user_info.err_msg,
-                            "message_unread": site_user_info.message_unread
+                            "message_unread": site_user_info.message_unread,
+                            "updated_at": datetime.now().strftime('%Y-%m-%d')
                         }
                     })
                 return site_user_info
 
         except Exception as e:
+            import traceback
             logger.error(f"站点 {site_name} 获取流量数据失败：{str(e)}")
+            logger.error(traceback.format_exc())
         return None
 
     def __notify_unread_msg(self, site_name: str, site_user_info: ISiteUserInfo, unread_msg_notify: bool):
@@ -1224,62 +1379,72 @@ class SiteStatistic(_PluginBase):
             if not refresh_sites:
                 return
 
+            # 将数据初始化为前一天，筛选站点
+            yesterday_sites_data = {}
+            today_date = datetime.now().strftime('%Y-%m-%d')
+            if self._statistic_type == "add" or not self._remove_failed:
+                if last_update_time := self.get_data("last_update_time"):
+                    yesterday_sites_data = self.get_data(last_update_time) or {}
+
+            if not self._remove_failed and yesterday_sites_data:
+                site_names = [site.get("name") for site in refresh_sites]
+                self._sites_data = {k: v for k, v in yesterday_sites_data.items() if k in site_names}
+
             # 并发刷新
             with ThreadPool(min(len(refresh_sites), int(self._queue_cnt or 5))) as p:
                 p.map(self.__refresh_site_data, refresh_sites)
 
             # 通知刷新完成
             if self._notify:
-                yesterday_sites_data = {}
-                # 增量数据
-                if self._statistic_type == "add":
-                    last_update_time = self.get_data("last_update_time")
-                    if last_update_time:
-                        yesterday_sites_data = self.get_data(last_update_time) or {}
-
-                messages = []
-                # 按照上传降序排序
-                sites = self._sites_data.keys()
-                uploads = [self._sites_data[site].get("upload") or 0 if not yesterday_sites_data.get(site) else
-                           (self._sites_data[site].get("upload") or 0) - (
-                                   yesterday_sites_data[site].get("upload") or 0) for site in sites]
-                downloads = [self._sites_data[site].get("download") or 0 if not yesterday_sites_data.get(site) else
-                             (self._sites_data[site].get("download") or 0) - (
-                                     yesterday_sites_data[site].get("download") or 0) for site in sites]
-                data_list = sorted(list(zip(sites, uploads, downloads)),
-                                   key=lambda x: x[1],
-                                   reverse=True)
+                messages = {}
                 # 总上传
                 incUploads = 0
                 # 总下载
                 incDownloads = 0
-                for data in data_list:
-                    site = data[0]
-                    upload = int(data[1])
-                    download = int(data[2])
+
+                for rand, site in enumerate(self._sites_data.keys()):
+                    upload = int(self._sites_data[site].get("upload") or 0)
+                    download = int(self._sites_data[site].get("download") or 0)
+                    updated_date = self._sites_data[site].get("updated_at")
+
+                    if self._statistic_type == "add" and yesterday_sites_data.get(site):
+                        upload -= int(yesterday_sites_data[site].get("upload") or 0)
+                        download -= int(yesterday_sites_data[site].get("download") or 0)
+
+                    if updated_date and updated_date != today_date:
+                        updated_date = f"（{updated_date}）"
+                    else:
+                        updated_date = ""
+
                     if upload > 0 or download > 0:
-                        incUploads += int(upload)
-                        incDownloads += int(download)
-                        messages.append(f"【{site}】\n"
-                                        f"上传量：{StringUtils.str_filesize(upload)}\n"
-                                        f"下载量：{StringUtils.str_filesize(download)}\n"
-                                        f"————————————")
+                        incUploads += upload
+                        incDownloads += download
+                        messages[upload + (rand / 1000)] = (
+                                f"【{site}】{updated_date}\n"
+                                + f"上传量：{StringUtils.str_filesize(upload)}\n"
+                                + f"下载量：{StringUtils.str_filesize(download)}\n"
+                                + "————————————"
+                        )
 
                 if incDownloads or incUploads:
-                    messages.insert(0, f"【汇总】\n"
-                                       f"总上传：{StringUtils.str_filesize(incUploads)}\n"
-                                       f"总下载：{StringUtils.str_filesize(incDownloads)}\n"
-                                       f"————————————")
+                    sorted_messages = [messages[key] for key in sorted(messages.keys(), reverse=True)]
+                    sorted_messages.insert(0, f"【汇总】\n"
+                                              f"总上传：{StringUtils.str_filesize(incUploads)}\n"
+                                              f"总下载：{StringUtils.str_filesize(incDownloads)}\n"
+                                              f"————————————")
                     self.post_message(mtype=NotificationType.SiteMessage,
-                                      title="站点数据统计", text="\n".join(messages))
+                                      title="站点数据统计", text="\n".join(sorted_messages))
 
-            # 获取今天的日期
-            key = datetime.now().strftime('%Y-%m-%d')
             # 保存数据
-            self.save_data(key, self._sites_data)
+            self.save_data(today_date, self._sites_data)
 
             # 更新时间
-            self.save_data("last_update_time", key)
+            self.save_data("last_update_time", today_date)
+
+            self.eventmanager.send_event(etype=EventType.PluginAction, data={
+                "action": "sitestatistic_refresh_complete"
+            })
+
             logger.info("站点数据刷新完成")
 
     def __custom_sites(self) -> List[Any]:
@@ -1297,8 +1462,10 @@ class SiteStatistic(_PluginBase):
             "notify": self._notify,
             "sitemsg": self._sitemsg,
             "queue_cnt": self._queue_cnt,
+            "remove_failed": self._remove_failed,
             "statistic_type": self._statistic_type,
             "statistic_sites": self._statistic_sites,
+            "dashboard_type": self._dashboard_type
         })
 
     @eventmanager.register(EventType.SiteDeleted)
